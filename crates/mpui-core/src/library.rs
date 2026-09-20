@@ -29,13 +29,14 @@ impl Library {
         self.tracks.clear();
         self.order.clear();
 
-        for dir in directories {
+        for raw_dir in directories {
+            let dir = mpui_config::expand_tilde(raw_dir);
             if !dir.exists() {
                 warn!("library directory does not exist: {}", dir.display());
                 continue;
             }
 
-            let walker = WalkDir::new(dir)
+            let walker = WalkDir::new(&dir)
                 .follow_links(follow_symlinks)
                 .into_iter()
                 .filter_entry(|e| {

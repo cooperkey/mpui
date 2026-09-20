@@ -336,31 +336,42 @@ fn default_keybindings() -> HashMap<String, String> {
     pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
 }
 
+
+/// Expands a leading tilde `~` to the user's home directory.
+pub fn expand_tilde(path: &Path) -> PathBuf {
+    if let Ok(stripped) = path.strip_prefix("~") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(stripped);
+        }
+    }
+    path.to_path_buf()
+}
+
 /// Returns the XDG config directory for mpui.
 pub fn config_dir() -> PathBuf {
     dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("~/.config"))
+        .unwrap_or_else(|| dirs::home_dir().map(|h| h.join(".config")).unwrap_or_else(|| PathBuf::from("~/.config")))
         .join("mpui")
 }
 
 /// Returns the XDG cache directory for mpui.
 pub fn cache_dir() -> PathBuf {
     dirs::cache_dir()
-        .unwrap_or_else(|| PathBuf::from("~/.cache"))
+        .unwrap_or_else(|| dirs::home_dir().map(|h| h.join(".cache")).unwrap_or_else(|| PathBuf::from("~/.cache")))
         .join("mpui")
 }
 
 /// Returns the XDG data directory for mpui.
 pub fn data_dir() -> PathBuf {
     dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("~/.local/share"))
+        .unwrap_or_else(|| dirs::home_dir().map(|h| h.join(".local/share")).unwrap_or_else(|| PathBuf::from("~/.local/share")))
         .join("mpui")
 }
 
 /// Load config from disk, merging user overrides onto compiled defaults.
 pub fn load(path: Option<&Path>) -> Result<Config> {
     let config_path = path
-        .map(PathBuf::from)
+        .map(expand_tilde)
         .unwrap_or_else(|| config_dir().join("config.toml"));
 
     if !config_path.exists() {
@@ -369,7 +380,30 @@ pub fn load(path: Option<&Path>) -> Result<Config> {
     }
 
     let contents = std::fs::read_to_string(&config_path)?;
-    let config: Config = toml::from_str(&contents)?;
+    let mut config: Config = toml::from_str(&contents)?;
+    
+    for dir in &mut config.library.directories {
+        *dir = expand_tilde(dir);
+    }
+    config.library.cache_path = expand_tilde(&config.library.cache_path);
+    config.playlist.save_path = expand_tilde(&config.playlist.save_path);
+    if let Some(ref fallback) = config.album_art.fallback_path {
+        config.album_art.fallback_path = Some(expand_tilde(fallback));
+    }
+
     tracing::info!("loaded config from {}", config_path.display());
     Ok(config)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_expand_tilde() {
+        let home = dirs::home_dir().expect("home dir should exist");
+        assert_eq!(expand_tilde(Path::new("~/music")), home.join("music"));
+        assert_eq!(expand_tilde(Path::new("~")), home);
+        assert_eq!(expand_tilde(Path::new("/tmp/test")), PathBuf::from("/tmp/test"));
+    }
 }
