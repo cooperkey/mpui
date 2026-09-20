@@ -8,6 +8,8 @@ use std::sync::Arc;
 /// Audio output stream wrapping cpal.
 pub struct AudioOutput {
     _stream: Stream,
+    pub sample_rate: u32,
+    pub channels: u16,
 }
 
 impl AudioOutput {
@@ -68,6 +70,37 @@ impl AudioOutput {
 
         stream.play()?;
 
-        Ok(Self { _stream: stream })
+        let sample_rate = config.sample_rate.0;
+        let channels = config.channels;
+
+        Ok(Self {
+            _stream: stream,
+            sample_rate,
+            channels,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_device_config() {
+        let host = cpal::default_host();
+        if let Some(device) = host.default_output_device() {
+            if let Ok(conf) = device.default_output_config() {
+                println!("Default device: {}, rate: {}, channels: {}", 
+                    device.name().unwrap_or_default(), 
+                    conf.sample_rate().0, 
+                    conf.channels());
+            }
+            if let Ok(ranges) = device.supported_output_configs() {
+                for r in ranges {
+                    println!("Supported: channels: {}, min: {}, max: {}, format: {:?}",
+                        r.channels(), r.min_sample_rate().0, r.max_sample_rate().0, r.sample_format());
+                }
+            }
+        }
     }
 }

@@ -1,17 +1,30 @@
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState};
+use ratatui::widgets::{Block, Borders, List, ListItem};
 use ratatui::Frame;
 
-use crate::app::App;
+use crate::app::{App, FocusedPanel};
 
 /// Render the queue panel — ordered list of queued tracks with current indicator.
-pub fn render(frame: &mut Frame, area: Rect, app: &App) {
+pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
+    let is_focused = app.focused_panel == FocusedPanel::Queue;
+    let border_color = if is_focused {
+        Color::Cyan
+    } else {
+        Color::DarkGray
+    };
+
+    let title = if is_focused {
+        " [queue] "
+    } else {
+        " queue "
+    };
+
     let block = Block::default()
-        .title(" queue ")
+        .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray));
+        .border_style(Style::default().fg(border_color));
 
     let current_index = app.queue.current_index();
 
@@ -36,10 +49,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 Style::default().fg(Color::Gray)
             };
 
-            let prefix = if is_current { "|" } else { " " };
+            let prefix = if is_current { "▶ " } else { "  " };
             let line = Line::from(vec![
                 Span::styled(prefix, style),
-                Span::raw(" "),
                 Span::styled(title, style),
             ]);
 
@@ -47,10 +59,23 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         })
         .collect();
 
-    let mut state = ListState::default();
-    state.select(Some(app.queue_cursor));
+    app.queue_state.select(Some(app.queue_cursor));
 
-    let list = List::new(items).block(block).highlight_symbol("> ");
+    let highlight_style = if is_focused {
+        Style::default()
+            .bg(Color::Rgb(35, 45, 75))
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+            .bg(Color::Rgb(25, 25, 35))
+            .fg(Color::Gray)
+    };
 
-    frame.render_stateful_widget(list, area, &mut state);
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(highlight_style)
+        .highlight_symbol("> ");
+
+    frame.render_stateful_widget(list, area, &mut app.queue_state);
 }

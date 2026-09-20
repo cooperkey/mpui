@@ -11,7 +11,6 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
 use mpui_audio::player::Player;
-use mpui_audio::output::AudioOutput;
 use mpui_config;
 use mpui_tui::app::App;
 use mpui_tui::input;
@@ -30,10 +29,6 @@ fn main() -> Result<()> {
     let playback_state = player.state.clone();
     let command_tx = player.command_sender();
     let spectrum = player.spectrum.clone();
-    let sample_rx = player.sample_receiver();
-    
-    // Default to common format. Dynamically re-opening CPAL streams per track can be tricky.
-    let _audio_output = AudioOutput::new(None, None, sample_rx)?;
     
     std::thread::spawn(move || {
         player.run();
@@ -52,11 +47,13 @@ fn main() -> Result<()> {
 
     let tick_rate = Duration::from_millis(33);
     loop {
-        terminal.draw(|frame| ui::render(frame, &app))?;
+        terminal.draw(|frame| ui::render(frame, &mut app))?;
 
         if event::poll(tick_rate)? {
             if let Event::Key(key) = event::read()? {
-                input::handle_key(&mut app, key);
+                if key.kind == crossterm::event::KeyEventKind::Press {
+                    input::handle_key(&mut app, key);
+                }
             }
         }
 

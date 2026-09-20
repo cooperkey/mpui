@@ -79,6 +79,9 @@ impl Player {
         let mut current_samples_decoded: u64 = 0;
         let mut analyzer = SpectrumAnalyzer::new(2048);
         let mut equalizer = Equalizer::new(44100, 2);
+        let mut audio_output = crate::output::AudioOutput::new(None, None, self.sample_rx.clone()).ok();
+        let mut active_out_rate = audio_output.as_ref().map(|o| o.sample_rate).unwrap_or(44100);
+        let mut active_out_channels = audio_output.as_ref().map(|o| o.channels as usize).unwrap_or(2);
         
         loop {
             let cmd = if decoder.is_some() && !self.state.lock().paused {
@@ -93,16 +96,22 @@ impl Player {
                 match cmd {
                     PlayerCommand::Play(path) => {
                         if let Ok(dec) = StreamingDecoder::new(&path) {
+                            let (duration, sample_rate, channels) = (dec.total_duration, dec.sample_rate, dec.channels);
                             decoder = Some(dec);
                             current_samples_decoded = 0;
                             let mut state = self.state.lock();
                             state.playing = true;
                             state.paused = false;
                             state.position = Duration::ZERO;
-                            let (duration, sample_rate, channels) = {
-                                let d = decoder.as_ref().unwrap();
-                                (d.total_duration, d.sample_rate, d.channels)
-                            };
+
+                            // Recreate audio output stream to match track sample rate and channels if different
+                            if audio_output.as_ref().map(|o| (o.sample_rate, o.channels as usize)) != Some((sample_rate, channels)) {
+                                if let Ok(new_output) = crate::output::AudioOutput::new(Some(sample_rate), Some(channels as u16), self.sample_rx.clone()) {
+                                    active_out_rate = new_output.sample_rate;
+                                    active_out_channels = new_output.channels as usize;
+                                    audio_output = Some(new_output);
+                                }
+                            }
                             
                             let old_gains = *equalizer.gains();
                             let old_enabled = equalizer.is_enabled();
@@ -193,7 +202,11 @@ impl Player {
                         current_samples_decoded += (frame.len() / channels) as u64;
                         self.state.lock().position = Duration::from_secs_f64(current_samples_decoded as f64 / dec.sample_rate as f64);
                         
-                        if self.sample_tx.send(frame).is_err() {
+                        // Channel conversion & sample rate matching
+                        let ch_adapted = convert_channels(&frame, channels, active_out_channels);
+                        let resampled = resample_linear(&ch_adapted, dec.sample_rate, active_out_rate, active_out_channels);
+
+                        if self.sample_tx.send(resampled).is_err() {
                             break;
                         }
                     } else {
@@ -216,4 +229,49 @@ impl Player {
     pub fn command_sender(&self) -> Sender<PlayerCommand> {
         self.command_tx.clone()
     }
+}
+
+fn convert_channels(input: &[f32], in_channels: usize, out_channels: usize) -> Vec<f32> {
+    if in_channels == out_channels || in_channels == 0 || out_channels == 0 {
+        return input.to_vec();
+    }
+    let frames = input.len() / in_channels;
+    let mut out = Vec::with_capacity(frames * out_channels);
+    for frame in input.chunks_exact(in_channels) {
+        if in_channels == 1 && out_channels == 2 {
+            out.push(frame[0]);
+            out.push(frame[0]);
+        } else if in_channels == 2 && out_channels == 1 {
+            out.push(0.5 * (frame[0] + frame[1]));
+        } else {
+            for ch in 0..out_channels {
+                out.push(frame[ch % in_channels]);
+            }
+        }
+    }
+    out
+}
+
+fn resample_linear(input: &[f32], in_rate: u32, out_rate: u32, channels: usize) -> Vec<f32> {
+    if in_rate == out_rate || in_rate == 0 || out_rate == 0 || channels == 0 || input.is_empty() {
+        return input.to_vec();
+    }
+    let in_frames = input.len() / channels;
+    let ratio = in_rate as f64 / out_rate as f64;
+    let out_frames = ((in_frames as f64) / ratio).floor() as usize;
+    let mut out = Vec::with_capacity(out_frames * channels);
+
+    for out_frame_idx in 0..out_frames {
+        let in_pos = out_frame_idx as f64 * ratio;
+        let idx0 = in_pos.floor() as usize;
+        let frac = (in_pos - idx0 as f64) as f32;
+        let idx1 = (idx0 + 1).min(in_frames.saturating_sub(1));
+
+        for ch in 0..channels {
+            let s0 = input[idx0 * channels + ch];
+            let s1 = input[idx1 * channels + ch];
+            out.push(s0 + frac * (s1 - s0));
+        }
+    }
+    out
 }

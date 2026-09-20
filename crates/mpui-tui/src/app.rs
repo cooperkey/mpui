@@ -61,6 +61,8 @@ pub struct App {
     pub eq_cursor: usize,
     pub search_engine: SearchEngine,
     pub current_art: Option<(mpui_core::track::TrackId, Vec<u8>)>,
+    pub library_state: ratatui::widgets::ListState,
+    pub queue_state: ratatui::widgets::ListState,
 }
 
 impl App {
@@ -95,6 +97,8 @@ impl App {
             eq_cursor: 0,
             search_engine: SearchEngine::new(),
             current_art: None,
+            library_state: ratatui::widgets::ListState::default(),
+            queue_state: ratatui::widgets::ListState::default(),
         }
     }
 

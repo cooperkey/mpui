@@ -8,7 +8,7 @@ use crate::panels;
 ///
 /// Phase 1 uses a hardcoded default layout. The configurable layout DSL
 /// parser will be implemented in phase 5.
-pub fn render(frame: &mut Frame, app: &App) {
+pub fn render(frame: &mut Frame, app: &mut App) {
     let size = frame.area();
 
     // Top-level horizontal split: left panel (library) | right panel (rest).

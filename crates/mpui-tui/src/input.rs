@@ -49,40 +49,59 @@ pub enum KeyAction {
 }
 
 fn resolve_action(key_str: &str, config: &mpui_config::Config) -> Option<KeyAction> {
-    let action_str = config.keybindings.get(key_str)?;
-    match action_str.as_str() {
-        "move_down" => Some(KeyAction::MoveDown),
-        "move_up" => Some(KeyAction::MoveUp),
-        "jump_top" => Some(KeyAction::JumpTop),
-        "jump_bottom" => Some(KeyAction::JumpBottom),
-        "collapse_or_seek_back" => Some(KeyAction::CollapseOrSeekBack),
-        "expand_or_seek_forward" => Some(KeyAction::ExpandOrSeekForward),
-        "confirm" => Some(KeyAction::Confirm),
-        "toggle_pause" => Some(KeyAction::TogglePause),
-        "search" => Some(KeyAction::Search),
-        "search_next" => Some(KeyAction::SearchNext),
-        "search_prev" => Some(KeyAction::SearchPrev),
-        "quit" => Some(KeyAction::Quit),
-        "command_mode" => Some(KeyAction::CommandMode),
-        "focus_next" => Some(KeyAction::FocusNext),
-        "focus_prev" => Some(KeyAction::FocusPrev),
-        "next_track" => Some(KeyAction::NextTrack),
-        "prev_track" => Some(KeyAction::PrevTrack),
-        "volume_up" => Some(KeyAction::VolumeUp),
-        "volume_down" => Some(KeyAction::VolumeDown),
-        "mute_toggle" => Some(KeyAction::MuteToggle),
-        "shuffle_toggle" => Some(KeyAction::ShuffleToggle),
-        "repeat_cycle" => Some(KeyAction::RepeatCycle),
-        "queue_add" => Some(KeyAction::QueueAdd),
-        "queue_remove" => Some(KeyAction::QueueRemove),
-        "open_directory" => Some(KeyAction::OpenDirectory),
-        "track_info" => Some(KeyAction::TrackInfo),
-        "toggle_visualizer" => Some(KeyAction::ToggleVisualizer),
-        "toggle_equalizer" => Some(KeyAction::ToggleEqualizer),
-        "toggle_album_art" => Some(KeyAction::ToggleAlbumArt),
-        "center_current" => Some(KeyAction::CenterCurrent),
-        "scroll_half_down" => Some(KeyAction::ScrollHalfDown),
-        "scroll_half_up" => Some(KeyAction::ScrollHalfUp),
+    if let Some(action_str) = config.keybindings.get(key_str) {
+        let action = match action_str.as_str() {
+            "move_down" => Some(KeyAction::MoveDown),
+            "move_up" => Some(KeyAction::MoveUp),
+            "jump_top" => Some(KeyAction::JumpTop),
+            "jump_bottom" => Some(KeyAction::JumpBottom),
+            "collapse_or_seek_back" => Some(KeyAction::CollapseOrSeekBack),
+            "expand_or_seek_forward" => Some(KeyAction::ExpandOrSeekForward),
+            "confirm" => Some(KeyAction::Confirm),
+            "toggle_pause" => Some(KeyAction::TogglePause),
+            "search" => Some(KeyAction::Search),
+            "search_next" => Some(KeyAction::SearchNext),
+            "search_prev" => Some(KeyAction::SearchPrev),
+            "quit" => Some(KeyAction::Quit),
+            "command_mode" => Some(KeyAction::CommandMode),
+            "focus_next" => Some(KeyAction::FocusNext),
+            "focus_prev" => Some(KeyAction::FocusPrev),
+            "next_track" => Some(KeyAction::NextTrack),
+            "prev_track" => Some(KeyAction::PrevTrack),
+            "volume_up" => Some(KeyAction::VolumeUp),
+            "volume_down" => Some(KeyAction::VolumeDown),
+            "mute_toggle" => Some(KeyAction::MuteToggle),
+            "shuffle_toggle" => Some(KeyAction::ShuffleToggle),
+            "repeat_cycle" => Some(KeyAction::RepeatCycle),
+            "queue_add" => Some(KeyAction::QueueAdd),
+            "queue_remove" => Some(KeyAction::QueueRemove),
+            "open_directory" => Some(KeyAction::OpenDirectory),
+            "track_info" => Some(KeyAction::TrackInfo),
+            "toggle_visualizer" => Some(KeyAction::ToggleVisualizer),
+            "toggle_equalizer" => Some(KeyAction::ToggleEqualizer),
+            "toggle_album_art" => Some(KeyAction::ToggleAlbumArt),
+            "center_current" => Some(KeyAction::CenterCurrent),
+            "scroll_half_down" => Some(KeyAction::ScrollHalfDown),
+            "scroll_half_up" => Some(KeyAction::ScrollHalfUp),
+            _ => None,
+        };
+        if action.is_some() {
+            return action;
+        }
+    }
+
+    // Standard intuitive key fallbacks
+    match key_str {
+        "down" => Some(KeyAction::MoveDown),
+        "up" => Some(KeyAction::MoveUp),
+        "left" => Some(KeyAction::CollapseOrSeekBack),
+        "right" => Some(KeyAction::ExpandOrSeekForward),
+        "pagedown" | "page_down" => Some(KeyAction::ScrollHalfDown),
+        "pageup" | "page_up" => Some(KeyAction::ScrollHalfUp),
+        "home" => Some(KeyAction::JumpTop),
+        "end" => Some(KeyAction::JumpBottom),
+        "enter" => Some(KeyAction::Confirm),
+        "space" => Some(KeyAction::TogglePause),
         _ => None,
     }
 }
@@ -100,7 +119,7 @@ fn key_event_to_string(key: &KeyEvent) -> String {
             if c == ' ' {
                 s.push_str("space");
             } else {
-                s.push(c.to_ascii_lowercase());
+                s.push(c);
             }
         }
         KeyCode::Tab => {
@@ -119,6 +138,10 @@ fn key_event_to_string(key: &KeyEvent) -> String {
         KeyCode::Down => s.push_str("down"),
         KeyCode::Left => s.push_str("left"),
         KeyCode::Right => s.push_str("right"),
+        KeyCode::PageDown => s.push_str("pagedown"),
+        KeyCode::PageUp => s.push_str("pageup"),
+        KeyCode::Home => s.push_str("home"),
+        KeyCode::End => s.push_str("end"),
         KeyCode::Backspace => s.push_str("backspace"),
         _ => {}
     }
