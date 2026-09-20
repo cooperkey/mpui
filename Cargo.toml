@@ -1,0 +1,67 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/mpui-core",
+    "crates/mpui-audio",
+    "crates/mpui-tui",
+    "crates/mpui-config",
+    "crates/mpui-search",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+rust-version = "1.75"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+ratatui = "0.29"
+crossterm = "0.28"
+symphonia = { version = "0.5", features = ["all"] }
+cpal = "0.15"
+rustfft = "6"
+nucleo = "0.3"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "sync", "time"] }
+parking_lot = "0.12"
+ringbuf = "0.4"
+crossbeam-channel = "0.5"
+notify = "7"
+walkdir = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1"
+thiserror = "2"
+mpui-core = { path = "crates/mpui-core" }
+mpui-audio = { path = "crates/mpui-audio" }
+mpui-tui = { path = "crates/mpui-tui" }
+mpui-config = { path = "crates/mpui-config" }
+mpui-search = { path = "crates/mpui-search" }
+
+[package]
+name = "mpui"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mpui-core.workspace = true
+mpui-audio.workspace = true
+mpui-tui.workspace = true
+mpui-config.workspace = true
+mpui-search.workspace = true
+tokio.workspace = true
+crossterm.workspace = true
+ratatui.workspace = true
+crossbeam-channel.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+opt-level = 3

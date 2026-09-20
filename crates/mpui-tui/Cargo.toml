@@ -1,0 +1,18 @@
+[package]
+name = "mpui-tui"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mpui-config = { path = "../mpui-config" }
+mpui-core = { path = "../mpui-core" }
+mpui-audio = { path = "../mpui-audio" }
+mpui-search = { path = "../mpui-search" }
+ratatui.workspace = true
+crossterm.workspace = true
+crossbeam-channel.workspace = true
+image.workspace = true
+parking_lot.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true

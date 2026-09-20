@@ -1,0 +1,11 @@
+[package]
+name = "mpui-search"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mpui-config = { path = "../mpui-config" }
+nucleo.workspace = true
+parking_lot.workspace = true
+tracing.workspace = true
+anyhow.workspace = true

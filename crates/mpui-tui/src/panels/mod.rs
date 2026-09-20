@@ -1,0 +1,8 @@
+pub mod library;
+pub mod now_playing;
+pub mod queue;
+pub mod status;
+pub mod visualizer;
+pub mod search;
+pub mod album_art;
+pub mod equalizer;

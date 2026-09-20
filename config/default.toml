@@ -1,0 +1,101 @@
+# default conf
+
+[general]
+auto_reload_config = true
+
+[library]
+directories = ["~/music"]
+scan_hidden = false
+follow_symlinks = true
+cache_path = "~/.cache/mpui/library.db"
+
+[audio]
+backend = "auto"
+buffer_size = 4096
+crossfade_ms = 0
+replaygain = "track"
+volume_step = 5
+
+[visualizer]
+enabled = true
+style = "bars"
+bar_width = 2
+bar_count = 0
+gravity = 1.8
+smoothing = 0.7
+fps = 30
+
+[equalizer]
+enabled = true
+active_preset = "flat"
+
+[equalizer.presets.flat]
+bands = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+[equalizer.presets.bass_boost]
+bands = [6, 5, 4, 2, 0, 0, 0, 0, 0, 0]
+
+[equalizer.presets.vocal]
+bands = [-2, -1, 0, 2, 4, 4, 3, 1, 0, -1]
+
+[album_art]
+enabled = true
+render_mode = "halfblock"
+max_colors = 256
+dither = true
+
+[layout]
+active = "default"
+
+[layout.presets]
+default = "horizontal [ vertical(35) [ library(60) queue(40) ] vertical(65) [ now_playing(10) visualizer(80) equalizer(10) ] ]"
+minimal = "horizontal [ library(50) vertical(50) [ now_playing(15) queue(85) ] ]"
+
+[theme]
+bg = "default"
+fg = "#c0c0c0"
+border = "#333333"
+border_focused = "#555555"
+title = "#888888"
+selection_bg = "#1a1a2e"
+selection_fg = "#e0e0e0"
+playing_fg = "#e94560"
+progress_filled = "#0f3460"
+progress_empty = "#1a1a1a"
+muted_fg = "#555555"
+
+[playlist]
+save_format = "m3u"
+save_path = "~/.local/share/mpui/playlists/"
+restore_on_start = true
+
+[keybindings]
+"j" = "move_down"
+"k" = "move_up"
+"g g" = "jump_top"
+"G" = "jump_bottom"
+"h" = "collapse_or_seek_back"
+"l" = "expand_or_seek_forward"
+"enter" = "confirm"
+"space" = "toggle_pause"
+"/" = "search"
+"n" = "search_next"
+"N" = "search_prev"
+"q" = "quit"
+":" = "command_mode"
+"tab" = "focus_next"
+"s-tab" = "focus_prev"
+">" = "next_track"
+"<" = "prev_track"
+"+" = "volume_up"
+"-" = "volume_down"
+"m" = "mute_toggle"
+"s" = "shuffle_toggle"
+"r" = "repeat_cycle"
+"a" = "queue_add"
+"d d" = "queue_remove"
+"v" = "toggle_visualizer"
+"e" = "toggle_equalizer"
+"c" = "toggle_album_art"
+"c-d" = "scroll_half_down"
+"c-u" = "scroll_half_up"

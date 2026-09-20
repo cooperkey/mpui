@@ -1,0 +1,16 @@
+[package]
+name = "mpui-audio"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mpui-config = { path = "../mpui-config" }
+symphonia.workspace = true
+cpal.workspace = true
+rustfft.workspace = true
+ringbuf.workspace = true
+crossbeam-channel.workspace = true
+parking_lot.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true

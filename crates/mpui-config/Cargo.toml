@@ -1,0 +1,13 @@
+[package]
+name = "mpui-config"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde.workspace = true
+toml.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+notify.workspace = true
+dirs = "6"
