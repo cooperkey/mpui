@@ -1,0 +1,257 @@
+import re
+
+with open('/home/lando/mpui/crates/mpui-tui/src/input.rs', 'r') as f:
+    content = f.read()
+
+replacement = """#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyAction {
+    MoveDown,
+    MoveUp,
+    JumpTop,
+    JumpBottom,
+    CollapseOrSeekBack,
+    ExpandOrSeekForward,
+    Confirm,
+    TogglePause,
+    Search,
+    SearchNext,
+    SearchPrev,
+    Quit,
+    CommandMode,
+    FocusNext,
+    FocusPrev,
+    NextTrack,
+    PrevTrack,
+    VolumeUp,
+    VolumeDown,
+    MuteToggle,
+    ShuffleToggle,
+    RepeatCycle,
+    QueueAdd,
+    QueueRemove,
+    OpenDirectory,
+    TrackInfo,
+    ToggleVisualizer,
+    ToggleEqualizer,
+    ToggleAlbumArt,
+    CenterCurrent,
+    ScrollHalfDown,
+    ScrollHalfUp,
+}
+
+fn resolve_action(key_str: &str, config: &mpui_config::Config) -> Option<KeyAction> {
+    let action_str = config.keybindings.get(key_str)?;
+    match action_str.as_str() {
+        "move_down" => Some(KeyAction::MoveDown),
+        "move_up" => Some(KeyAction::MoveUp),
+        "jump_top" => Some(KeyAction::JumpTop),
+        "jump_bottom" => Some(KeyAction::JumpBottom),
+        "collapse_or_seek_back" => Some(KeyAction::CollapseOrSeekBack),
+        "expand_or_seek_forward" => Some(KeyAction::ExpandOrSeekForward),
+        "confirm" => Some(KeyAction::Confirm),
+        "toggle_pause" => Some(KeyAction::TogglePause),
+        "search" => Some(KeyAction::Search),
+        "search_next" => Some(KeyAction::SearchNext),
+        "search_prev" => Some(KeyAction::SearchPrev),
+        "quit" => Some(KeyAction::Quit),
+        "command_mode" => Some(KeyAction::CommandMode),
+        "focus_next" => Some(KeyAction::FocusNext),
+        "focus_prev" => Some(KeyAction::FocusPrev),
+        "next_track" => Some(KeyAction::NextTrack),
+        "prev_track" => Some(KeyAction::PrevTrack),
+        "volume_up" => Some(KeyAction::VolumeUp),
+        "volume_down" => Some(KeyAction::VolumeDown),
+        "mute_toggle" => Some(KeyAction::MuteToggle),
+        "shuffle_toggle" => Some(KeyAction::ShuffleToggle),
+        "repeat_cycle" => Some(KeyAction::RepeatCycle),
+        "queue_add" => Some(KeyAction::QueueAdd),
+        "queue_remove" => Some(KeyAction::QueueRemove),
+        "open_directory" => Some(KeyAction::OpenDirectory),
+        "track_info" => Some(KeyAction::TrackInfo),
+        "toggle_visualizer" => Some(KeyAction::ToggleVisualizer),
+        "toggle_equalizer" => Some(KeyAction::ToggleEqualizer),
+        "toggle_album_art" => Some(KeyAction::ToggleAlbumArt),
+        "center_current" => Some(KeyAction::CenterCurrent),
+        "scroll_half_down" => Some(KeyAction::ScrollHalfDown),
+        "scroll_half_up" => Some(KeyAction::ScrollHalfUp),
+        _ => None,
+    }
+}
+
+fn key_event_to_string(key: &KeyEvent) -> String {
+    let mut s = String::new();
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        s.push_str("c-");
+    }
+    if key.modifiers.contains(KeyModifiers::ALT) {
+        s.push_str("m-");
+    }
+    match key.code {
+        KeyCode::Char(c) => {
+            if c == ' ' {
+                s.push_str("space");
+            } else {
+                s.push(c.to_ascii_lowercase());
+            }
+        }
+        KeyCode::Tab => {
+            if key.modifiers.contains(KeyModifiers::SHIFT) {
+                s.push_str("s-tab");
+            } else {
+                s.push_str("tab");
+            }
+        }
+        KeyCode::BackTab => {
+            s.push_str("s-tab");
+        }
+        KeyCode::Enter => s.push_str("enter"),
+        KeyCode::Esc => s.push_str("esc"),
+        KeyCode::Up => s.push_str("up"),
+        KeyCode::Down => s.push_str("down"),
+        KeyCode::Left => s.push_str("left"),
+        KeyCode::Right => s.push_str("right"),
+        KeyCode::Backspace => s.push_str("backspace"),
+        _ => {}
+    }
+    s
+}
+
+fn handle_normal_mode(app: &mut App, key: KeyEvent) {
+    let key_str = key_event_to_string(&key);
+    if key_str.is_empty() {
+        return;
+    }
+
+    if let Some((pending_str, time)) = app.pending_key.clone() {
+        if time.elapsed() < std::time::Duration::from_millis(500) {
+            let combined = format!("{} {}", pending_str, key_str);
+            if let Some(action) = resolve_action(&combined, &app.config) {
+                app.pending_key = None;
+                execute_action(app, action);
+                return;
+            }
+        }
+        app.pending_key = None;
+    }
+
+    let is_prefix = app.config.keybindings.keys().any(|k| k.starts_with(&format!("{} ", key_str)));
+    if is_prefix {
+        app.pending_key = Some((key_str, std::time::Instant::now()));
+        return;
+    }
+
+    if let Some(action) = resolve_action(&key_str, &app.config) {
+        execute_action(app, action);
+    }
+}
+
+fn execute_action(app: &mut App, action: KeyAction) {
+    match action {
+        KeyAction::MoveDown => move_cursor_down(app),
+        KeyAction::MoveUp => move_cursor_up(app),
+        KeyAction::JumpTop => {
+            app.library_cursor = 0;
+            app.queue_cursor = 0;
+        }
+        KeyAction::JumpBottom => move_cursor_bottom(app),
+        KeyAction::CollapseOrSeekBack => {
+            if app.focused_panel == FocusedPanel::Equalizer {
+                app.eq_cursor = app.eq_cursor.saturating_sub(1);
+            } else {
+                let pos = app.playback.lock().position;
+                let new_pos = pos.saturating_sub(std::time::Duration::from_secs(5));
+                let _ = app.command_tx.send(PlayerCommand::Seek(new_pos));
+            }
+        }
+        KeyAction::ExpandOrSeekForward => {
+            if app.focused_panel == FocusedPanel::Equalizer {
+                app.eq_cursor = (app.eq_cursor + 1).min(9);
+            } else {
+                let pos = app.playback.lock().position;
+                let new_pos = pos.saturating_add(std::time::Duration::from_secs(5));
+                let _ = app.command_tx.send(PlayerCommand::Seek(new_pos));
+            }
+        }
+        KeyAction::Confirm => handle_confirm(app),
+        KeyAction::TogglePause => app.toggle_pause(),
+        KeyAction::Search => {
+            app.input_mode = InputMode::Search;
+            app.search_query.clear();
+            app.search_results.clear();
+            app.search_cursor = 0;
+        }
+        KeyAction::CommandMode => {
+            app.input_mode = InputMode::Command;
+            app.command_buffer.clear();
+        }
+        KeyAction::Quit => app.should_quit = true,
+        KeyAction::FocusNext => cycle_focus(app, true),
+        KeyAction::FocusPrev => cycle_focus(app, false),
+        KeyAction::QueueAdd => {
+            let ids = app.library.track_ids();
+            if let Some(&id) = ids.get(app.library_cursor) {
+                app.queue.push(id);
+            }
+        }
+        KeyAction::QueueRemove => {
+            if app.focused_panel == FocusedPanel::Queue {
+                let ids = app.queue.items();
+                if app.queue_cursor < ids.len() {
+                    app.queue.remove(app.queue_cursor);
+                    app.queue_cursor = app.queue_cursor.saturating_sub(1);
+                }
+            }
+        }
+        KeyAction::NextTrack => {
+            if let Some(id) = app.queue.next() {
+                if let Some(track) = app.library.get(id) {
+                    let _ = app.command_tx.send(PlayerCommand::Play(track.path.clone()));
+                    if let Some(art) = mpui_core::metadata::extract_cover_art(&track.path) {
+                        app.current_art = Some((id, art));
+                    } else {
+                        app.current_art = None;
+                    }
+                }
+            }
+        }
+        KeyAction::PrevTrack => {
+            if let Some(id) = app.queue.prev() {
+                if let Some(track) = app.library.get(id) {
+                    let _ = app.command_tx.send(PlayerCommand::Play(track.path.clone()));
+                    if let Some(art) = mpui_core::metadata::extract_cover_art(&track.path) {
+                        app.current_art = Some((id, art));
+                    } else {
+                        app.current_art = None;
+                    }
+                }
+            }
+        }
+        KeyAction::VolumeUp => app.volume_up(),
+        KeyAction::VolumeDown => app.volume_down(),
+        KeyAction::MuteToggle => app.toggle_mute(),
+        KeyAction::ShuffleToggle => app.toggle_shuffle(),
+        KeyAction::RepeatCycle => app.cycle_repeat(),
+        KeyAction::ScrollHalfDown => {
+            for _ in 0..10 {
+                move_cursor_down(app);
+            }
+        }
+        KeyAction::ScrollHalfUp => {
+            for _ in 0..10 {
+                move_cursor_up(app);
+            }
+        }
+        _ => {}
+    }
+}
+"""
+
+start = content.find("fn handle_normal_mode")
+end = content.find("fn handle_command_mode")
+if start != -1 and end != -1:
+    new_content = content[:start] + replacement + "\n" + content[end:]
+    with open('/home/lando/mpui/crates/mpui-tui/src/input.rs', 'w') as f:
+        f.write(new_content)
+    print("updated input.rs")
+else:
+    print("could not find boundaries")

@@ -54,12 +54,13 @@ pub struct App {
 
     pub should_quit: bool,
 
-    pub pending_key: Option<(char, Instant)>,
+    pub pending_key: Option<(String, Instant)>,
     pub search_results: Vec<(usize, u32)>,
     pub search_cursor: usize,
     pub eq_gains: [f32; 10],
     pub eq_cursor: usize,
     pub search_engine: SearchEngine,
+    pub current_art: Option<(mpui_core::track::TrackId, Vec<u8>)>,
 }
 
 impl App {
@@ -93,6 +94,7 @@ impl App {
             eq_gains: [0.0; 10],
             eq_cursor: 0,
             search_engine: SearchEngine::new(),
+            current_art: None,
         }
     }
 

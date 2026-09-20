@@ -108,3 +108,48 @@ pub fn read_metadata(path: &Path) -> Result<Track> {
         format,
     })
 }
+
+/// Extract cover art from an audio file or its directory.
+pub fn extract_cover_art(path: &Path) -> Option<Vec<u8>> {
+    let file = std::fs::File::open(path).ok()?;
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+
+    let mut hint = Hint::new();
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
+    }
+
+    if let Ok(mut probed) = symphonia::default::get_probe().format(
+        &hint,
+        mss,
+        &FormatOptions::default(),
+        &MetadataOptions::default(),
+    ) {
+        if let Some(metadata) = probed.format.metadata().current() {
+            if let Some(visual) = metadata.visuals().first() {
+                return Some(visual.data.to_vec());
+            }
+        }
+
+        if let Some(metadata) = probed.metadata.get().as_ref().and_then(|m| m.current()) {
+            if let Some(visual) = metadata.visuals().first() {
+                return Some(visual.data.to_vec());
+            }
+        }
+    }
+
+    // Fallback to directory images
+    if let Some(parent) = path.parent() {
+        let candidates = ["cover.jpg", "cover.png", "folder.jpg", "folder.png"];
+        for c in candidates {
+            let p = parent.join(c);
+            if p.exists() {
+                if let Ok(data) = std::fs::read(&p) {
+                    return Some(data);
+                }
+            }
+        }
+    }
+
+    None
+}

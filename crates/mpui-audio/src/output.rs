@@ -16,8 +16,8 @@ impl AudioOutput {
     /// `rx` receives chunks of interleaved f32 samples from the player thread.
     /// The cpal callback pulls from a shared buffer fed by those chunks.
     pub fn new(
-        sample_rate: u32,
-        channels: u16,
+        sample_rate: Option<u32>,
+        channels: Option<u16>,
         sample_rx: Receiver<Vec<f32>>,
     ) -> Result<Self> {
         let host = cpal::default_host();
@@ -25,9 +25,10 @@ impl AudioOutput {
             .default_output_device()
             .context("no audio output device found")?;
 
+        let default_config = device.default_output_config()?;
         let config = StreamConfig {
-            channels,
-            sample_rate: cpal::SampleRate(sample_rate),
+            channels: channels.unwrap_or(default_config.channels()),
+            sample_rate: sample_rate.map(cpal::SampleRate).unwrap_or(default_config.sample_rate()),
             buffer_size: cpal::BufferSize::Default,
         };
 

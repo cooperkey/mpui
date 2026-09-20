@@ -33,7 +33,7 @@ fn main() -> Result<()> {
     let sample_rx = player.sample_receiver();
     
     // Default to common format. Dynamically re-opening CPAL streams per track can be tricky.
-    let _audio_output = AudioOutput::new(44100, 2, sample_rx)?;
+    let _audio_output = AudioOutput::new(None, None, sample_rx)?;
     
     std::thread::spawn(move || {
         player.run();

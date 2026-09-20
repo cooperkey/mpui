@@ -6,6 +6,7 @@ use parking_lot::Mutex;
 
 use crate::visualizer::SpectrumAnalyzer;
 use crate::decoder::StreamingDecoder;
+use crate::equalizer::Equalizer;
 
 /// Commands sent from the UI thread to the player.
 pub enum PlayerCommand {
@@ -15,6 +16,8 @@ pub enum PlayerCommand {
     Stop,
     Seek(Duration),
     SetVolume(f32),
+    SetEqBand { band: usize, gain: f32 },
+    SetEqPreset([f32; 10]),
     Quit,
 }
 
@@ -75,6 +78,7 @@ impl Player {
         let mut decoder: Option<StreamingDecoder> = None;
         let mut current_samples_decoded: u64 = 0;
         let mut analyzer = SpectrumAnalyzer::new(2048);
+        let mut equalizer = Equalizer::new(44100, 2);
         
         loop {
             let cmd = if decoder.is_some() && !self.state.lock().paused {
@@ -99,6 +103,13 @@ impl Player {
                                 let d = decoder.as_ref().unwrap();
                                 (d.total_duration, d.sample_rate, d.channels)
                             };
+                            
+                            let old_gains = *equalizer.gains();
+                            let old_enabled = equalizer.is_enabled();
+                            equalizer = Equalizer::new(sample_rate, channels);
+                            equalizer.set_all_bands(&old_gains);
+                            equalizer.set_enabled(old_enabled);
+                            
                             state.sample_rate = sample_rate;
                             state.channels = channels as u16;
                             state.duration = if let Some(frames) = duration {
@@ -131,6 +142,12 @@ impl Player {
                     PlayerCommand::SetVolume(v) => {
                         self.state.lock().volume = v;
                     }
+                    PlayerCommand::SetEqBand { band, gain } => {
+                        equalizer.set_band(band, gain);
+                    }
+                    PlayerCommand::SetEqPreset(gains) => {
+                        equalizer.set_all_bands(&gains);
+                    }
                     PlayerCommand::Quit => {
                         quit = true;
                     }
@@ -153,6 +170,8 @@ impl Player {
                 let paused = self.state.lock().paused;
                 if !paused {
                     if let Some(mut frame) = dec.next_frame() {
+                        equalizer.process(&mut frame);
+                        
                         let volume = self.state.lock().volume;
                         for s in &mut frame {
                             *s *= volume;
@@ -165,6 +184,11 @@ impl Player {
                             mono.push(sum / channels as f32);
                         }
                         analyzer.analyze(&mono);
+                        {
+                            let mut shared_spec = self.spectrum.lock();
+                            let local_spec = analyzer.spectrum.lock();
+                            shared_spec.clone_from(&local_spec);
+                        }
 
                         current_samples_decoded += (frame.len() / channels) as u64;
                         self.state.lock().position = Duration::from_secs_f64(current_samples_decoded as f64 / dec.sample_rate as f64);
