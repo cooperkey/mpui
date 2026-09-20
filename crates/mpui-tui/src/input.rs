@@ -346,8 +346,44 @@ fn execute_command(app: &mut App, cmd: &str) {
                     .send(PlayerCommand::SetVolume(app.volume.as_f32()));
             }
         }
+        Some("seek") => {
+            if let Some(arg) = parts.get(1) {
+                if let Some(dur) = parse_duration_str(arg) {
+                    let _ = app.command_tx.send(PlayerCommand::Seek(dur));
+                }
+            }
+        }
+        Some("eq") => {
+            if let Some(preset_name) = parts.get(1) {
+                if let Some(preset) = app.config.equalizer.presets.get(*preset_name) {
+                    app.eq_gains = preset.bands;
+                    let _ = app.command_tx.send(PlayerCommand::SetEqPreset(preset.bands));
+                }
+            }
+        }
         Some("rescan") => app.scan_library(),
         _ => {} // Unknown command — silently ignore for now.
+    }
+}
+
+fn parse_duration_str(s: &str) -> Option<std::time::Duration> {
+    let s = s.trim();
+    if s.contains(':') {
+        let parts: Vec<&str> = s.split(':').collect();
+        if parts.len() == 2 {
+            let mins: u64 = parts[0].parse().ok()?;
+            let secs: u64 = parts[1].parse().ok()?;
+            return Some(std::time::Duration::from_secs(mins * 60 + secs));
+        } else if parts.len() == 3 {
+            let hours: u64 = parts[0].parse().ok()?;
+            let mins: u64 = parts[1].parse().ok()?;
+            let secs: u64 = parts[2].parse().ok()?;
+            return Some(std::time::Duration::from_secs(hours * 3600 + mins * 60 + secs));
+        }
+        None
+    } else {
+        let secs: u64 = s.parse().ok()?;
+        Some(std::time::Duration::from_secs(secs))
     }
 }
 
@@ -357,6 +393,20 @@ fn handle_confirm(app: &mut App) {
             let ids = app.library.track_ids();
             if let Some(&id) = ids.get(app.library_cursor) {
                 app.queue.push(id);
+                if let Some(track) = app.library.get(id) {
+                    let _ = app.command_tx.send(PlayerCommand::Play(track.path.clone()));
+                    if let Some(art) = mpui_core::metadata::extract_cover_art(&track.path) {
+                        app.current_art = Some((id, art));
+                    } else {
+                        app.current_art = None;
+                    }
+                }
+            }
+        }
+        FocusedPanel::Queue => {
+            let items = app.queue.items();
+            if let Some(&id) = items.get(app.queue_cursor) {
+                app.queue.set_current(app.queue_cursor);
                 if let Some(track) = app.library.get(id) {
                     let _ = app.command_tx.send(PlayerCommand::Play(track.path.clone()));
                     if let Some(art) = mpui_core::metadata::extract_cover_art(&track.path) {
@@ -381,6 +431,13 @@ fn move_cursor_down(app: &mut App) {
             let max = app.queue.len().saturating_sub(1);
             app.queue_cursor = (app.queue_cursor + 1).min(max);
         }
+        FocusedPanel::Equalizer => {
+            app.eq_gains[app.eq_cursor] = (app.eq_gains[app.eq_cursor] - 1.0).max(-12.0);
+            let _ = app.command_tx.send(PlayerCommand::SetEqBand {
+                band: app.eq_cursor,
+                gain: app.eq_gains[app.eq_cursor],
+            });
+        }
         _ => {}
     }
 }
@@ -392,6 +449,13 @@ fn move_cursor_up(app: &mut App) {
         }
         FocusedPanel::Queue => {
             app.queue_cursor = app.queue_cursor.saturating_sub(1);
+        }
+        FocusedPanel::Equalizer => {
+            app.eq_gains[app.eq_cursor] = (app.eq_gains[app.eq_cursor] + 1.0).min(12.0);
+            let _ = app.command_tx.send(PlayerCommand::SetEqBand {
+                band: app.eq_cursor,
+                gain: app.eq_gains[app.eq_cursor],
+            });
         }
         _ => {}
     }
