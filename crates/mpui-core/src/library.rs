@@ -100,3 +100,15 @@ fn is_audio_file(path: &Path) -> bool {
         .map(|ext| AUDIO_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
         .unwrap_or(false)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_scan_with_tilde() {
+        let mut lib = Library::new();
+        lib.scan(&[PathBuf::from("~/Downloads")], true, false);
+        assert!(!lib.is_empty(), "Library should index files in ~/Downloads");
+    }
+}
