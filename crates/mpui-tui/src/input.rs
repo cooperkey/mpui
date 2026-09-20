@@ -41,7 +41,19 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
     }
 
     match key.code {
-        KeyCode::Char('g') | KeyCode::Char('d') | KeyCode::Char('z') => {
+        KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            for _ in 0..10 {
+                move_cursor_down(app);
+            }
+        }
+        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            for _ in 0..10 {
+                move_cursor_up(app);
+            }
+        }
+        KeyCode::Char('g') | KeyCode::Char('d') | KeyCode::Char('z')
+            if key.modifiers.is_empty() =>
+        {
             if let KeyCode::Char(c) = key.code {
                 app.pending_key = Some((c, std::time::Instant::now()));
             }
@@ -109,18 +121,6 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
         KeyCode::Enter => handle_confirm(app),
         KeyCode::Tab => cycle_focus(app, true),
         KeyCode::BackTab => cycle_focus(app, false),
-        KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            // ctrl-d: scroll half page down
-            for _ in 0..10 {
-                move_cursor_down(app);
-            }
-        }
-        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            // ctrl-u: scroll half page up
-            for _ in 0..10 {
-                move_cursor_up(app);
-            }
-        }
         _ => {}
     }
 }
