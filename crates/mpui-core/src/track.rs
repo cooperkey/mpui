@@ -25,6 +25,8 @@ pub struct Track {
     pub channels: Option<u8>,
     pub bitrate: Option<u32>,
     pub format: String,
+    pub replay_gain_track: Option<f32>,
+    pub replay_gain_album: Option<f32>,
 }
 
 impl Track {

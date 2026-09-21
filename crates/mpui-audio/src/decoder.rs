@@ -22,6 +22,8 @@ pub struct StreamingDecoder {
     pub sample_rate: u32,
     pub channels: usize,
     pub total_duration: Option<u64>,
+    pub replaygain_track: Option<f32>,
+    pub replaygain_album: Option<f32>,
 }
 
 impl StreamingDecoder {
@@ -36,12 +38,38 @@ impl StreamingDecoder {
             hint.with_extension(ext);
         }
 
-        let probed = symphonia::default::get_probe().format(
+        let mut probed = symphonia::default::get_probe().format(
             &hint,
             mss,
             &FormatOptions::default(),
             &MetadataOptions::default(),
         )?;
+
+        let mut replaygain_track = None;
+        let mut replaygain_album = None;
+
+        let mut check_tags = |tags: &[symphonia::core::meta::Tag]| {
+            for tag in tags {
+                let key_upper = tag.key.to_ascii_uppercase();
+                if key_upper.contains("REPLAYGAIN_TRACK_GAIN") {
+                    if let Some(val) = parse_gain(&tag.value.to_string()) {
+                        replaygain_track = Some(val);
+                    }
+                } else if key_upper.contains("REPLAYGAIN_ALBUM_GAIN") {
+                    if let Some(val) = parse_gain(&tag.value.to_string()) {
+                        replaygain_album = Some(val);
+                    }
+                }
+            }
+        };
+
+        if let Some(metadata) = probed.format.metadata().current() {
+            check_tags(metadata.tags());
+        }
+
+        if let Some(metadata) = probed.metadata.get().as_ref().and_then(|m| m.current()) {
+            check_tags(metadata.tags());
+        }
 
         let format = probed.format;
 
@@ -74,6 +102,8 @@ impl StreamingDecoder {
             sample_rate,
             channels,
             total_duration,
+            replaygain_track,
+            replaygain_album,
         })
     }
 
@@ -194,4 +224,10 @@ pub fn decode_file(path: &Path) -> Result<DecodedAudio> {
         sample_rate,
         channels,
     })
+}
+
+fn parse_gain(s: &str) -> Option<f32> {
+    let s = s.trim();
+    let cleaned = s.trim_end_matches(|c: char| c.is_alphabetic() || c.is_whitespace());
+    cleaned.parse::<f32>().ok()
 }

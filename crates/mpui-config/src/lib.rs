@@ -20,8 +20,6 @@ pub struct Config {
     pub theme: ThemeConfig,
     pub keybindings: HashMap<String, String>,
     pub playlist: PlaylistConfig,
-
-    #[cfg(target_os = "android")]
     pub termux: TermuxConfig,
 }
 
@@ -38,8 +36,6 @@ impl Default for Config {
             theme: ThemeConfig::default(),
             keybindings: default_keybindings(),
             playlist: PlaylistConfig::default(),
-
-            #[cfg(target_os = "android")]
             termux: TermuxConfig::default(),
         }
     }
@@ -248,16 +244,16 @@ impl Default for ThemeConfig {
     fn default() -> Self {
         Self {
             bg: "default".into(),
-            fg: "#c0c0c0".into(),
-            border: "#333333".into(),
-            border_focused: "#555555".into(),
-            title: "#888888".into(),
-            selection_bg: "#1a1a2e".into(),
-            selection_fg: "#e0e0e0".into(),
-            playing_fg: "#e94560".into(),
-            progress_filled: "#0f3460".into(),
-            progress_empty: "#1a1a1a".into(),
-            muted_fg: "#555555".into(),
+            fg: "default".into(),
+            border: "default".into(),
+            border_focused: "cyan".into(),
+            title: "default".into(),
+            selection_bg: "default".into(),
+            selection_fg: "default".into(),
+            playing_fg: "cyan".into(),
+            progress_filled: "default".into(),
+            progress_empty: "darkgray".into(),
+            muted_fg: "darkgray".into(),
         }
     }
 }
@@ -280,7 +276,6 @@ impl Default for PlaylistConfig {
     }
 }
 
-#[cfg(target_os = "android")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TermuxConfig {
@@ -288,7 +283,6 @@ pub struct TermuxConfig {
     pub background_playback: bool,
 }
 
-#[cfg(target_os = "android")]
 impl Default for TermuxConfig {
     fn default() -> Self {
         Self {
@@ -368,11 +362,15 @@ pub fn data_dir() -> PathBuf {
         .join("mpui")
 }
 
+/// Returns the resolved path to the config file.
+pub fn get_config_path(path: Option<&Path>) -> PathBuf {
+    path.map(expand_tilde)
+        .unwrap_or_else(|| config_dir().join("config.toml"))
+}
+
 /// Load config from disk, merging user overrides onto compiled defaults.
 pub fn load(path: Option<&Path>) -> Result<Config> {
-    let config_path = path
-        .map(expand_tilde)
-        .unwrap_or_else(|| config_dir().join("config.toml"));
+    let config_path = get_config_path(path);
 
     if !config_path.exists() {
         tracing::info!("no config file found at {}, using defaults", config_path.display());
@@ -393,6 +391,43 @@ pub fn load(path: Option<&Path>) -> Result<Config> {
 
     tracing::info!("loaded config from {}", config_path.display());
     Ok(config)
+}
+
+/// Watch the configuration file for changes on disk and invoke `callback` on reload.
+pub fn watch_config<F>(path: Option<&Path>, mut callback: F) -> Result<notify::RecommendedWatcher>
+where
+    F: FnMut(Config) + Send + 'static,
+{
+    use notify::{Event, RecursiveMode, Watcher};
+
+    let target_file = get_config_path(path);
+    let watch_dir = target_file
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| target_file.clone());
+
+    let target_file_cloned = target_file.clone();
+    let mut watcher = notify::recommended_watcher(move |res: notify::Result<Event>| {
+        if let Ok(event) = res {
+            let matches = event.paths.iter().any(|p| {
+                p == &target_file_cloned
+                    || p.file_name() == target_file_cloned.file_name()
+            });
+            if matches {
+                std::thread::sleep(std::time::Duration::from_millis(60));
+                if let Ok(new_cfg) = load(Some(&target_file_cloned)) {
+                    tracing::info!("reloaded config from {}", target_file_cloned.display());
+                    callback(new_cfg);
+                }
+            }
+        }
+    })?;
+
+    if watch_dir.exists() {
+        watcher.watch(&watch_dir, RecursiveMode::NonRecursive)?;
+    }
+
+    Ok(watcher)
 }
 
 #[cfg(test)]

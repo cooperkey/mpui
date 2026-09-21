@@ -63,14 +63,22 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
     app.queue_state.select(Some(app.queue_cursor));
 
     let highlight_style = if is_focused {
-        Style::default()
-            .bg(app.theme.selection_bg)
-            .fg(app.theme.selection_fg)
-            .add_modifier(Modifier::BOLD)
+        if app.theme.selection_bg == ratatui::style::Color::Reset {
+            Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
+        } else {
+            Style::default()
+                .bg(app.theme.selection_bg)
+                .fg(app.theme.selection_fg)
+                .add_modifier(Modifier::BOLD)
+        }
     } else {
-        Style::default()
-            .bg(app.theme.selection_bg)
-            .fg(app.theme.muted_fg)
+        if app.theme.selection_bg == ratatui::style::Color::Reset {
+            Style::default().add_modifier(Modifier::DIM)
+        } else {
+            Style::default()
+                .bg(app.theme.selection_bg)
+                .fg(app.theme.muted_fg)
+        }
     };
 
     let list = List::new(items)

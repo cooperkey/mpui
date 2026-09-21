@@ -72,6 +72,7 @@ pub struct App {
     pub show_queue: bool,
     pub show_lyrics: bool,
     pub current_lyrics: Option<Vec<(std::time::Duration, String)>>,
+    pub visualizer_bars: Vec<f32>,
 }
 
 impl App {
@@ -120,6 +121,7 @@ impl App {
             show_queue: true,
             show_lyrics: false,
             current_lyrics: None,
+            visualizer_bars: Vec::new(),
         }
     }
 
@@ -170,5 +172,30 @@ impl App {
         self.muted = !self.muted;
         let vol = if self.muted { 0.0 } else { self.volume.as_f32() };
         let _ = self.command_tx.send(PlayerCommand::SetVolume(vol));
+    }
+
+    pub fn reload_config(&mut self, config: Config) {
+        self.theme = crate::theme::Theme::from_config(&config.theme);
+        self.show_visualizer = config.visualizer.enabled;
+        self.show_equalizer = config.equalizer.enabled;
+        self.show_album_art = config.album_art.enabled;
+        let _ = self
+            .command_tx
+            .send(PlayerCommand::SetReplayGainMode(config.audio.replaygain.clone()));
+        self.config = config;
+    }
+
+    pub fn play_track_at_index(&mut self, id: mpui_core::track::TrackId) {
+        if let Some(track) = self.library.get(id).cloned() {
+            if self.config.termux.background_playback {
+                mpui_core::termux::acquire_wake_lock();
+            }
+            if self.config.termux.notifications {
+                mpui_core::termux::send_notification(track.display_title(), track.display_artist());
+            }
+            let _ = self.command_tx.send(PlayerCommand::Play(track.path.clone()));
+            self.current_art = mpui_core::metadata::extract_cover_art(&track.path).map(|art| (id, art));
+            self.current_lyrics = mpui_core::metadata::extract_lyrics(&track.path);
+        }
     }
 }

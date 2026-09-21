@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -11,6 +12,7 @@ pub struct SpectrumAnalyzer {
     fft_size: usize,
     planner: FftPlanner<f32>,
     window: Vec<f32>,
+    history: VecDeque<f32>,
     /// Latest magnitude spectrum, shared with the UI thread.
     pub spectrum: Arc<Mutex<Vec<f32>>>,
 }
@@ -23,34 +25,42 @@ impl SpectrumAnalyzer {
             fft_size,
             planner: FftPlanner::new(),
             window,
+            history: VecDeque::with_capacity(fft_size),
             spectrum,
         }
     }
 
-    /// Compute the magnitude spectrum from a buffer of mono f32 samples.
-    ///
-    /// If `samples.len() < fft_size`, the buffer is zero-padded.
+    /// Compute the magnitude spectrum from a buffer of mono f32 samples using a sliding window.
     pub fn analyze(&mut self, samples: &[f32]) {
+        for &s in samples {
+            if self.history.len() >= self.fft_size {
+                self.history.pop_front();
+            }
+            self.history.push_back(s);
+        }
+
+        if self.history.len() < self.fft_size {
+            return;
+        }
+
         let fft = self.planner.plan_fft_forward(self.fft_size);
 
-        let mut buffer: Vec<Complex<f32>> = samples
+        let mut buffer: Vec<Complex<f32>> = self
+            .history
             .iter()
-            .take(self.fft_size)
             .enumerate()
             .map(|(i, &s)| Complex::new(s * self.window[i], 0.0))
             .collect();
 
-        // Zero-pad if needed.
-        buffer.resize(self.fft_size, Complex::new(0.0, 0.0));
-
         fft.process(&mut buffer);
 
         let half = self.fft_size / 2;
-        let norm = 1.0 / self.fft_size as f32;
+        // Parseval unitary normalization (1 / sqrt(N))
+        let norm = 1.0 / (self.fft_size as f32).sqrt();
         let mut spec = self.spectrum.lock();
         spec.resize(half, 0.0);
         for i in 0..half {
-            spec[i] = (buffer[i].norm() * norm).max(0.0);
+            spec[i] = buffer[i].norm() * norm;
         }
     }
 

@@ -37,31 +37,47 @@ pub fn read_metadata(path: &Path) -> Result<Track> {
     let mut year = None;
     let mut track_number = None;
     let mut disc_number = None;
+    let mut replay_gain_track = None;
+    let mut replay_gain_album = None;
 
-    // Read metadata from the format reader's metadata store.
-    if let Some(metadata) = probed.format.metadata().current() {
-        for tag in metadata.tags() {
+    let mut process_tags = |tags: &[symphonia::core::meta::Tag]| {
+        for tag in tags {
+            let val_str = tag.value.to_string();
             if let Some(std_key) = tag.std_key {
                 use symphonia::core::meta::StandardTagKey::*;
                 match std_key {
-                    TrackTitle => title = Some(tag.value.to_string()),
-                    Artist => artist = Some(tag.value.to_string()),
-                    Album => album = Some(tag.value.to_string()),
-                    AlbumArtist => album_artist = Some(tag.value.to_string()),
-                    Genre => genre = Some(tag.value.to_string()),
+                    TrackTitle => title = Some(val_str.clone()),
+                    Artist => artist = Some(val_str.clone()),
+                    Album => album = Some(val_str.clone()),
+                    AlbumArtist => album_artist = Some(val_str.clone()),
+                    Genre => genre = Some(val_str.clone()),
                     Date => {
-                        year = tag.value.to_string().get(..4).and_then(|y| y.parse().ok());
+                        year = val_str.get(..4).and_then(|y| y.parse().ok());
                     }
                     TrackNumber => {
-                        track_number = tag.value.to_string().parse().ok();
+                        track_number = val_str.parse().ok();
                     }
                     DiscNumber => {
-                        disc_number = tag.value.to_string().parse().ok();
+                        disc_number = val_str.parse().ok();
                     }
                     _ => {}
                 }
             }
+            let key_upper = tag.key.to_ascii_uppercase();
+            if key_upper.contains("REPLAYGAIN_TRACK_GAIN") {
+                replay_gain_track = parse_replaygain_db(&val_str);
+            } else if key_upper.contains("REPLAYGAIN_ALBUM_GAIN") {
+                replay_gain_album = parse_replaygain_db(&val_str);
+            }
         }
+    };
+
+    if let Some(metadata) = probed.format.metadata().current() {
+        process_tags(metadata.tags());
+    }
+
+    if let Some(metadata) = probed.metadata.get().as_ref().and_then(|m| m.current()) {
+        process_tags(metadata.tags());
     }
 
     // Extract codec info from the default track.
@@ -106,6 +122,8 @@ pub fn read_metadata(path: &Path) -> Result<Track> {
         channels,
         bitrate,
         format,
+        replay_gain_track,
+        replay_gain_album,
     })
 }
 
@@ -241,4 +259,34 @@ fn parse_lrc(content: &str) -> Vec<(std::time::Duration, String)> {
     }
     entries.sort_by_key(|e| e.0);
     entries
+}
+
+/// Parse a ReplayGain decibel string (e.g. "-6.50 dB" or "+1.20 dB") into f32.
+pub fn parse_replaygain_db(s: &str) -> Option<f32> {
+    let s = s.trim();
+    let cleaned = s.trim_end_matches(|c: char| c.is_alphabetic() || c.is_whitespace());
+    cleaned.parse::<f32>().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_replaygain_db() {
+        assert_eq!(parse_replaygain_db("-6.50 dB"), Some(-6.50));
+        assert_eq!(parse_replaygain_db("+1.20 dB"), Some(1.20));
+        assert_eq!(parse_replaygain_db(" -3.45 "), Some(-3.45));
+        assert_eq!(parse_replaygain_db("0.00 dB"), Some(0.0));
+        assert_eq!(parse_replaygain_db("invalid"), None);
+    }
+
+    #[test]
+    fn test_parse_lrc() {
+        let lrc = "[00:12.34]First line\n[01:02.50]Second line";
+        let parsed = parse_lrc(lrc);
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].1, "First line");
+        assert_eq!(parsed[1].1, "Second line");
+    }
 }

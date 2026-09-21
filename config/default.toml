@@ -53,16 +53,16 @@ minimal = "horizontal [ library(50) vertical(50) [ now_playing(15) queue(85) ] ]
 
 [theme]
 bg = "default"
-fg = "#c0c0c0"
-border = "#333333"
-border_focused = "#555555"
-title = "#888888"
-selection_bg = "#1a1a2e"
-selection_fg = "#e0e0e0"
-playing_fg = "#e94560"
-progress_filled = "#0f3460"
-progress_empty = "#1a1a1a"
-muted_fg = "#555555"
+fg = "default"
+border = "default"
+border_focused = "cyan"
+title = "default"
+selection_bg = "default"
+selection_fg = "default"
+playing_fg = "cyan"
+progress_filled = "default"
+progress_empty = "darkgray"
+muted_fg = "darkgray"
 
 [playlist]
 save_format = "m3u"

@@ -242,20 +242,12 @@ fn execute_action(app: &mut App, action: KeyAction) {
         }
         KeyAction::NextTrack => {
             if let Some(id) = app.queue.next() {
-                if let Some(track) = app.library.get(id) {
-                    let _ = app.command_tx.send(PlayerCommand::Play(track.path.clone()));
-                    app.current_art = mpui_core::metadata::extract_cover_art(&track.path).map(|art| (id, art));
-                    app.current_lyrics = mpui_core::metadata::extract_lyrics(&track.path);
-                }
+                app.play_track_at_index(id);
             }
         }
         KeyAction::PrevTrack => {
             if let Some(id) = app.queue.prev() {
-                if let Some(track) = app.library.get(id) {
-                    let _ = app.command_tx.send(PlayerCommand::Play(track.path.clone()));
-                    app.current_art = mpui_core::metadata::extract_cover_art(&track.path).map(|art| (id, art));
-                    app.current_lyrics = mpui_core::metadata::extract_lyrics(&track.path);
-                }
+                app.play_track_at_index(id);
             }
         }
         KeyAction::ToggleVisualizer => app.show_visualizer = !app.show_visualizer,
@@ -545,22 +537,14 @@ fn handle_confirm(app: &mut App) {
             let ids = app.library.track_ids();
             if let Some(&id) = ids.get(app.library_cursor) {
                 app.queue.push(id);
-                if let Some(track) = app.library.get(id) {
-                    let _ = app.command_tx.send(PlayerCommand::Play(track.path.clone()));
-                    app.current_art = mpui_core::metadata::extract_cover_art(&track.path).map(|art| (id, art));
-                    app.current_lyrics = mpui_core::metadata::extract_lyrics(&track.path);
-                }
+                app.play_track_at_index(id);
             }
         }
         FocusedPanel::Queue => {
             let items = app.queue.items();
             if let Some(&id) = items.get(app.queue_cursor) {
                 app.queue.set_current(app.queue_cursor);
-                if let Some(track) = app.library.get(id) {
-                    let _ = app.command_tx.send(PlayerCommand::Play(track.path.clone()));
-                    app.current_art = mpui_core::metadata::extract_cover_art(&track.path).map(|art| (id, art));
-                    app.current_lyrics = mpui_core::metadata::extract_lyrics(&track.path);
-                }
+                app.play_track_at_index(id);
             }
         }
         _ => {}

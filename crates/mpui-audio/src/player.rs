@@ -18,6 +18,7 @@ pub enum PlayerCommand {
     SetVolume(f32),
     SetEqBand { band: usize, gain: f32 },
     SetEqPreset([f32; 10]),
+    SetReplayGainMode(String),
     Quit,
 }
 
@@ -82,6 +83,8 @@ impl Player {
         let mut audio_output = crate::output::AudioOutput::new(None, None, self.sample_rx.clone()).ok();
         let mut active_out_rate = audio_output.as_ref().map(|o| o.sample_rate).unwrap_or(44100);
         let mut active_out_channels = audio_output.as_ref().map(|o| o.channels as usize).unwrap_or(2);
+        let mut replaygain_mode = "track".to_string();
+        let mut replaygain_factor: f32 = 1.0;
         
         loop {
             let cmd = if decoder.is_some() && !self.state.lock().paused {
@@ -97,6 +100,7 @@ impl Player {
                     PlayerCommand::Play(path) => {
                         if let Ok(dec) = StreamingDecoder::new(&path) {
                             let (duration, sample_rate, channels) = (dec.total_duration, dec.sample_rate, dec.channels);
+                            replaygain_factor = calculate_replaygain(&dec, &replaygain_mode);
                             decoder = Some(dec);
                             current_samples_decoded = 0;
                             let mut state = self.state.lock();
@@ -140,6 +144,7 @@ impl Player {
                         state.playing = false;
                         state.paused = false;
                         state.position = Duration::ZERO;
+                        self.spectrum.lock().clear();
                     }
                     PlayerCommand::Seek(duration) => {
                         if let Some(ref mut dec) = decoder {
@@ -156,6 +161,12 @@ impl Player {
                     }
                     PlayerCommand::SetEqPreset(gains) => {
                         equalizer.set_all_bands(&gains);
+                    }
+                    PlayerCommand::SetReplayGainMode(mode) => {
+                        replaygain_mode = mode;
+                        if let Some(ref dec) = decoder {
+                            replaygain_factor = calculate_replaygain(dec, &replaygain_mode);
+                        }
                     }
                     PlayerCommand::Quit => {
                         quit = true;
@@ -179,13 +190,16 @@ impl Player {
                 let paused = self.state.lock().paused;
                 if !paused {
                     if let Some(mut frame) = dec.next_frame() {
-                        equalizer.process(&mut frame);
-                        
-                        let volume = self.state.lock().volume;
-                        for s in &mut frame {
-                            *s *= volume;
+                        // ReplayGain loudness normalization
+                        if (replaygain_factor - 1.0).abs() > f32::EPSILON {
+                            for s in &mut frame {
+                                *s *= replaygain_factor;
+                            }
                         }
-                        
+
+                        equalizer.process(&mut frame);
+
+                        // Tap post-EQ mono signal for visualizer (pre-volume for consistent dynamics)
                         let channels = dec.channels;
                         let mut mono = Vec::with_capacity(frame.len() / channels);
                         for chunk in frame.chunks(channels) {
@@ -197,6 +211,14 @@ impl Player {
                             let mut shared_spec = self.spectrum.lock();
                             let local_spec = analyzer.spectrum.lock();
                             shared_spec.clone_from(&local_spec);
+                        }
+
+                        // Apply master volume attenuation for output
+                        let volume = self.state.lock().volume;
+                        if (volume - 1.0).abs() > f32::EPSILON {
+                            for s in &mut frame {
+                                *s *= volume;
+                            }
                         }
 
                         current_samples_decoded += (frame.len() / channels) as u64;
@@ -214,6 +236,7 @@ impl Player {
                         let mut state = self.state.lock();
                         state.playing = false;
                         state.position = Duration::ZERO;
+                        self.spectrum.lock().clear();
                     }
                 }
             }
@@ -274,4 +297,13 @@ fn resample_linear(input: &[f32], in_rate: u32, out_rate: u32, channels: usize) 
         }
     }
     out
+}
+
+fn calculate_replaygain(dec: &StreamingDecoder, mode: &str) -> f32 {
+    let db = match mode {
+        "track" => dec.replaygain_track.or(dec.replaygain_album),
+        "album" => dec.replaygain_album.or(dec.replaygain_track),
+        _ => None,
+    };
+    db.map(|d| 10.0f32.powf(d / 20.0)).unwrap_or(1.0)
 }
