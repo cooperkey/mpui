@@ -1,5 +1,5 @@
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
@@ -35,21 +35,21 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let line = Line::from(vec![
         Span::styled(
             format!(" {status_char} "),
-            Style::default().fg(Color::Magenta),
+            Style::default().fg(app.theme.playing_fg),
         ),
-        Span::styled(artist, Style::default().fg(Color::DarkGray)),
+        Span::styled(artist, Style::default().fg(app.theme.muted_fg)),
         Span::raw(" - "),
-        Span::styled(title, Style::default().fg(Color::White)),
+        Span::styled(title, Style::default().fg(app.theme.fg)),
         Span::raw("  "),
         Span::styled(
             format!("{position} / {duration}"),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(app.theme.muted_fg),
         ),
     ]);
 
     let block = Block::default()
         .borders(Borders::TOP)
-        .border_style(Style::default().fg(Color::DarkGray));
+        .border_style(Style::default().fg(app.theme.border));
 
     let paragraph = Paragraph::new(line).block(block);
     frame.render_widget(paragraph, area);

@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 mpui-config = { path = "../mpui-config" }
 serde.workspace = true
+bincode.workspace = true
 symphonia.workspace = true
 walkdir.workspace = true
 tokio.workspace = true

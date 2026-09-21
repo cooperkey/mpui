@@ -1,5 +1,5 @@
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
@@ -38,9 +38,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let line = Line::from(vec![
         Span::styled(
             format!(" {vol}  {repeat}  {shuffle} "),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(app.theme.muted_fg),
         ),
-        Span::styled(input_display, Style::default().fg(Color::White)),
+        Span::styled(input_display, Style::default().fg(app.theme.fg)),
     ]);
 
     let paragraph = Paragraph::new(line);

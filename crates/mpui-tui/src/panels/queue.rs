@@ -1,5 +1,5 @@
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem};
 use ratatui::Frame;
@@ -10,9 +10,9 @@ use crate::app::{App, FocusedPanel};
 pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
     let is_focused = app.focused_panel == FocusedPanel::Queue;
     let border_color = if is_focused {
-        Color::Cyan
+        app.theme.border_focused
     } else {
-        Color::DarkGray
+        app.theme.border
     };
 
     let title = if is_focused {
@@ -23,6 +23,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
 
     let block = Block::default()
         .title(title)
+        .title_style(Style::default().fg(app.theme.title))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(border_color));
 
@@ -43,10 +44,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
 
             let style = if is_current {
                 Style::default()
-                    .fg(Color::Magenta)
+                    .fg(app.theme.playing_fg)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::Gray)
+                Style::default().fg(app.theme.fg)
             };
 
             let prefix = if is_current { "▶ " } else { "  " };
@@ -63,13 +64,13 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
 
     let highlight_style = if is_focused {
         Style::default()
-            .bg(Color::Rgb(35, 45, 75))
-            .fg(Color::White)
+            .bg(app.theme.selection_bg)
+            .fg(app.theme.selection_fg)
             .add_modifier(Modifier::BOLD)
     } else {
         Style::default()
-            .bg(Color::Rgb(25, 25, 35))
-            .fg(Color::Gray)
+            .bg(app.theme.selection_bg)
+            .fg(app.theme.muted_fg)
     };
 
     let list = List::new(items)

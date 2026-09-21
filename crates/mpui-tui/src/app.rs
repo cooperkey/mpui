@@ -27,11 +27,13 @@ pub enum FocusedPanel {
     Visualizer,
     Equalizer,
     AlbumArt,
+    Lyrics,
 }
 
 /// Top-level application state shared across the TUI.
 pub struct App {
     pub config: Config,
+    pub theme: crate::theme::Theme,
     pub library: Library,
     pub queue: Queue,
     pub playback: Arc<Mutex<PlaybackState>>,
@@ -63,6 +65,13 @@ pub struct App {
     pub current_art: Option<(mpui_core::track::TrackId, Vec<u8>)>,
     pub library_state: ratatui::widgets::ListState,
     pub queue_state: ratatui::widgets::ListState,
+
+    pub show_visualizer: bool,
+    pub show_equalizer: bool,
+    pub show_album_art: bool,
+    pub show_queue: bool,
+    pub show_lyrics: bool,
+    pub current_lyrics: Option<Vec<(std::time::Duration, String)>>,
 }
 
 impl App {
@@ -72,8 +81,14 @@ impl App {
         command_tx: Sender<PlayerCommand>,
         spectrum: Arc<Mutex<Vec<f32>>>,
     ) -> Self {
+        let theme = crate::theme::Theme::from_config(&config.theme);
+        let show_viz = config.visualizer.enabled;
+        let show_eq = config.equalizer.enabled;
+        let show_art = config.album_art.enabled;
+
         Self {
             config,
+            theme,
             library: Library::new(),
             queue: Queue::new(),
             playback,
@@ -99,14 +114,21 @@ impl App {
             current_art: None,
             library_state: ratatui::widgets::ListState::default(),
             queue_state: ratatui::widgets::ListState::default(),
+            show_visualizer: show_viz,
+            show_equalizer: show_eq,
+            show_album_art: show_art,
+            show_queue: true,
+            show_lyrics: false,
+            current_lyrics: None,
         }
     }
 
     pub fn scan_library(&mut self) {
-        self.library.scan(
+        self.library.scan_with_cache(
             &self.config.library.directories,
             self.config.library.follow_symlinks,
             self.config.library.scan_hidden,
+            Some(&self.config.library.cache_path),
         );
     }
 

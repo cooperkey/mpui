@@ -45,16 +45,23 @@ pub fn render_image_halfblock(img_bytes: &[u8], width: u16, height: u16) -> Vec<
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let active = app.focused_panel == FocusedPanel::AlbumArt;
-    let border_style = if active {
-        Style::default().fg(Color::Cyan)
+    let border_color = if active {
+        app.theme.border_focused
     } else {
-        Style::default()
+        app.theme.border
+    };
+
+    let title = if active {
+        " [album art] "
+    } else {
+        " album art "
     };
 
     let block = Block::default()
-        .title("Album Art")
+        .title(title)
+        .title_style(Style::default().fg(app.theme.title))
         .borders(Borders::ALL)
-        .border_style(border_style);
+        .border_style(Style::default().fg(border_color));
 
     let inner = block.inner(area);
 

@@ -1,5 +1,5 @@
-use ratatui::layout::{Constraint, Direction, Layout, Rect, Alignment};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
+use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
@@ -7,16 +7,23 @@ use crate::app::{App, FocusedPanel};
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let active = app.focused_panel == FocusedPanel::Equalizer;
-    let border_style = if active {
-        Style::default().fg(Color::Cyan)
+    let border_color = if active {
+        app.theme.border_focused
     } else {
-        Style::default()
+        app.theme.border
+    };
+
+    let title = if active {
+        " [equalizer] "
+    } else {
+        " equalizer "
     };
 
     let block = Block::default()
-        .title("Equalizer")
+        .title(title)
+        .title_style(Style::default().fg(app.theme.title))
         .borders(Borders::ALL)
-        .border_style(border_style);
+        .border_style(Style::default().fg(border_color));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -41,9 +48,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         
         let mut bar_style = Style::default();
         if active && i == app.eq_cursor {
-            bar_style = bar_style.fg(Color::Yellow).add_modifier(Modifier::BOLD);
+            bar_style = bar_style.fg(app.theme.playing_fg).add_modifier(Modifier::BOLD);
         } else {
-            bar_style = bar_style.fg(Color::Green);
+            bar_style = bar_style.fg(app.theme.fg);
         }
 
         let chunk = chunks[i];

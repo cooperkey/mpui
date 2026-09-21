@@ -43,6 +43,7 @@ pub enum KeyAction {
     ToggleVisualizer,
     ToggleEqualizer,
     ToggleAlbumArt,
+    ToggleLyrics,
     CenterCurrent,
     ScrollHalfDown,
     ScrollHalfUp,
@@ -80,6 +81,7 @@ fn resolve_action(key_str: &str, config: &mpui_config::Config) -> Option<KeyActi
             "toggle_visualizer" => Some(KeyAction::ToggleVisualizer),
             "toggle_equalizer" => Some(KeyAction::ToggleEqualizer),
             "toggle_album_art" => Some(KeyAction::ToggleAlbumArt),
+            "toggle_lyrics" => Some(KeyAction::ToggleLyrics),
             "center_current" => Some(KeyAction::CenterCurrent),
             "scroll_half_down" => Some(KeyAction::ScrollHalfDown),
             "scroll_half_up" => Some(KeyAction::ScrollHalfUp),
@@ -102,6 +104,10 @@ fn resolve_action(key_str: &str, config: &mpui_config::Config) -> Option<KeyActi
         "end" => Some(KeyAction::JumpBottom),
         "enter" => Some(KeyAction::Confirm),
         "space" => Some(KeyAction::TogglePause),
+        "v" => Some(KeyAction::ToggleVisualizer),
+        "e" => Some(KeyAction::ToggleEqualizer),
+        "c" => Some(KeyAction::ToggleAlbumArt),
+        "y" => Some(KeyAction::ToggleLyrics),
         _ => None,
     }
 }
@@ -238,11 +244,8 @@ fn execute_action(app: &mut App, action: KeyAction) {
             if let Some(id) = app.queue.next() {
                 if let Some(track) = app.library.get(id) {
                     let _ = app.command_tx.send(PlayerCommand::Play(track.path.clone()));
-                    if let Some(art) = mpui_core::metadata::extract_cover_art(&track.path) {
-                        app.current_art = Some((id, art));
-                    } else {
-                        app.current_art = None;
-                    }
+                    app.current_art = mpui_core::metadata::extract_cover_art(&track.path).map(|art| (id, art));
+                    app.current_lyrics = mpui_core::metadata::extract_lyrics(&track.path);
                 }
             }
         }
@@ -250,14 +253,15 @@ fn execute_action(app: &mut App, action: KeyAction) {
             if let Some(id) = app.queue.prev() {
                 if let Some(track) = app.library.get(id) {
                     let _ = app.command_tx.send(PlayerCommand::Play(track.path.clone()));
-                    if let Some(art) = mpui_core::metadata::extract_cover_art(&track.path) {
-                        app.current_art = Some((id, art));
-                    } else {
-                        app.current_art = None;
-                    }
+                    app.current_art = mpui_core::metadata::extract_cover_art(&track.path).map(|art| (id, art));
+                    app.current_lyrics = mpui_core::metadata::extract_lyrics(&track.path);
                 }
             }
         }
+        KeyAction::ToggleVisualizer => app.show_visualizer = !app.show_visualizer,
+        KeyAction::ToggleEqualizer => app.show_equalizer = !app.show_equalizer,
+        KeyAction::ToggleAlbumArt => app.show_album_art = !app.show_album_art,
+        KeyAction::ToggleLyrics => app.show_lyrics = !app.show_lyrics,
         KeyAction::VolumeUp => app.volume_up(),
         KeyAction::VolumeDown => app.volume_down(),
         KeyAction::MuteToggle => app.toggle_mute(),
@@ -343,16 +347,36 @@ fn handle_search_mode(app: &mut App, key: KeyEvent) {
 
 fn update_search(app: &mut App) {
     let ids = app.library.track_ids();
-    let titles: Vec<String> = ids.iter().map(|&id| {
+    let query = app.search_query.trim();
+
+    let (scope, actual_query) = if let Some(stripped) = query.strip_prefix("t:") {
+        ("title", stripped.trim())
+    } else if let Some(stripped) = query.strip_prefix("a:") {
+        ("artist", stripped.trim())
+    } else if let Some(stripped) = query.strip_prefix("b:") {
+        ("album", stripped.trim())
+    } else if let Some(stripped) = query.strip_prefix("g:") {
+        ("genre", stripped.trim())
+    } else {
+        ("all", query)
+    };
+
+    let strings: Vec<String> = ids.iter().map(|&id| {
         if let Some(track) = app.library.get(id) {
-            format!("{} - {}", track.display_artist(), track.display_title())
+            match scope {
+                "title" => track.display_title().to_string(),
+                "artist" => track.display_artist().to_string(),
+                "album" => track.display_album().to_string(),
+                "genre" => track.genre.clone().unwrap_or_default(),
+                _ => format!("{} - {} {}", track.display_artist(), track.display_title(), track.display_album()),
+            }
         } else {
             String::new()
         }
     }).collect();
-    
-    let haystack = titles.iter().map(|s| s.as_str());
-    let results = app.search_engine.search(&app.search_query, haystack);
+
+    let haystack = strings.iter().map(|s| s.as_str());
+    let results = app.search_engine.search(actual_query, haystack);
     app.search_results = results.into_iter().map(|r| (r.index, r.score)).collect();
     app.search_cursor = 0;
 }
@@ -381,6 +405,111 @@ fn execute_command(app: &mut App, cmd: &str) {
                 if let Some(preset) = app.config.equalizer.presets.get(*preset_name) {
                     app.eq_gains = preset.bands;
                     let _ = app.command_tx.send(PlayerCommand::SetEqPreset(preset.bands));
+                }
+            }
+        }
+        Some("sort") => {
+            if let Some(field_str) = parts.get(1) {
+                let field = match field_str.to_lowercase().as_str() {
+                    "artist" => Some(mpui_core::library::SortField::Artist),
+                    "album" => Some(mpui_core::library::SortField::Album),
+                    "title" => Some(mpui_core::library::SortField::Title),
+                    "duration" | "time" => Some(mpui_core::library::SortField::Duration),
+                    "year" | "date" => Some(mpui_core::library::SortField::Year),
+                    _ => None,
+                };
+                if let Some(f) = field {
+                    app.library.sort_by(f);
+                }
+            }
+        }
+        Some("toggle") => {
+            if let Some(panel_str) = parts.get(1) {
+                match panel_str.to_lowercase().as_str() {
+                    "viz" | "visualizer" => app.show_visualizer = !app.show_visualizer,
+                    "eq" | "equalizer" => app.show_equalizer = !app.show_equalizer,
+                    "art" | "album_art" => app.show_album_art = !app.show_album_art,
+                    "lyrics" | "lrc" => app.show_lyrics = !app.show_lyrics,
+                    "queue" => app.show_queue = !app.show_queue,
+                    _ => {}
+                }
+            }
+        }
+        Some("layout") => {
+            if let Some(layout_name) = parts.get(1) {
+                match layout_name.to_lowercase().as_str() {
+                    "minimal" => {
+                        app.show_visualizer = false;
+                        app.show_equalizer = false;
+                        app.show_album_art = false;
+                        app.show_lyrics = false;
+                        app.show_queue = true;
+                    }
+                    "full" => {
+                        app.show_visualizer = true;
+                        app.show_equalizer = true;
+                        app.show_album_art = true;
+                        app.show_lyrics = true;
+                        app.show_queue = true;
+                    }
+                    "default" => {
+                        app.show_visualizer = true;
+                        app.show_equalizer = true;
+                        app.show_album_art = true;
+                        app.show_lyrics = false;
+                        app.show_queue = true;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Some("w") => {
+            let filename = parts.get(1).map(|s| s.to_string()).unwrap_or_else(|| "playlist.m3u".to_string());
+            let filename = if !filename.ends_with(".m3u") && !filename.ends_with(".m3u8") {
+                format!("{filename}.m3u")
+            } else {
+                filename
+            };
+            let save_dir = &app.config.playlist.save_path;
+            let _ = std::fs::create_dir_all(save_dir);
+            let target = save_dir.join(filename);
+            let mut content = String::from("#EXTM3U\n");
+            for &id in app.queue.items() {
+                if let Some(track) = app.library.get(id) {
+                    content.push_str(&format!("#EXTINF:{},{}\n", track.duration.map(|d| d.as_secs()).unwrap_or(0), track.display_title()));
+                    content.push_str(&format!("{}\n", track.path.display()));
+                }
+            }
+            let _ = std::fs::write(target, content);
+        }
+        Some("e") => {
+            if let Some(arg) = parts.get(1) {
+                let path = std::path::PathBuf::from(arg);
+                let path = mpui_config::expand_tilde(&path);
+                if path.exists() {
+                    if path.extension().and_then(|ext| ext.to_str()).map(|ext| ext.eq_ignore_ascii_case("m3u") || ext.eq_ignore_ascii_case("m3u8")).unwrap_or(false) {
+                        if let Ok(content) = std::fs::read_to_string(&path) {
+                            for line in content.lines() {
+                                let line = line.trim();
+                                if line.starts_with('#') || line.is_empty() {
+                                    continue;
+                                }
+                                let track_path = std::path::PathBuf::from(line);
+                                if track_path.exists() {
+                                    if let Ok(track) = mpui_core::metadata::read_metadata(&track_path) {
+                                        let id = track.id;
+                                        app.queue.push(id);
+                                    }
+                                }
+                            }
+                        }
+                    } else if let Ok(track) = mpui_core::metadata::read_metadata(&path) {
+                        let id = track.id;
+                        app.queue.push(id);
+                        let _ = app.command_tx.send(PlayerCommand::Play(track.path.clone()));
+                        app.current_art = mpui_core::metadata::extract_cover_art(&track.path).map(|art| (id, art));
+                        app.current_lyrics = mpui_core::metadata::extract_lyrics(&track.path);
+                    }
                 }
             }
         }
@@ -418,11 +547,8 @@ fn handle_confirm(app: &mut App) {
                 app.queue.push(id);
                 if let Some(track) = app.library.get(id) {
                     let _ = app.command_tx.send(PlayerCommand::Play(track.path.clone()));
-                    if let Some(art) = mpui_core::metadata::extract_cover_art(&track.path) {
-                        app.current_art = Some((id, art));
-                    } else {
-                        app.current_art = None;
-                    }
+                    app.current_art = mpui_core::metadata::extract_cover_art(&track.path).map(|art| (id, art));
+                    app.current_lyrics = mpui_core::metadata::extract_lyrics(&track.path);
                 }
             }
         }
@@ -432,11 +558,8 @@ fn handle_confirm(app: &mut App) {
                 app.queue.set_current(app.queue_cursor);
                 if let Some(track) = app.library.get(id) {
                     let _ = app.command_tx.send(PlayerCommand::Play(track.path.clone()));
-                    if let Some(art) = mpui_core::metadata::extract_cover_art(&track.path) {
-                        app.current_art = Some((id, art));
-                    } else {
-                        app.current_art = None;
-                    }
+                    app.current_art = mpui_core::metadata::extract_cover_art(&track.path).map(|art| (id, art));
+                    app.current_lyrics = mpui_core::metadata::extract_lyrics(&track.path);
                 }
             }
         }
@@ -498,7 +621,23 @@ fn move_cursor_bottom(app: &mut App) {
 
 fn cycle_focus(app: &mut App, forward: bool) {
     use FocusedPanel::*;
-    let panels = [Library, Queue, Visualizer, Equalizer, AlbumArt];
+    let mut panels = vec![Library];
+    if app.show_queue {
+        panels.push(Queue);
+    }
+    if app.show_visualizer {
+        panels.push(Visualizer);
+    }
+    if app.show_equalizer {
+        panels.push(Equalizer);
+    }
+    if app.show_album_art {
+        panels.push(AlbumArt);
+    }
+    if app.show_lyrics {
+        panels.push(Lyrics);
+    }
+
     let current = panels.iter().position(|&p| p == app.focused_panel).unwrap_or(0);
     let next = if forward {
         (current + 1) % panels.len()

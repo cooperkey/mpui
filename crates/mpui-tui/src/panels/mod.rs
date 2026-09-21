@@ -6,3 +6,4 @@ pub mod visualizer;
 pub mod search;
 pub mod album_art;
 pub mod equalizer;
+pub mod lyrics;

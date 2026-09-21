@@ -153,3 +153,92 @@ pub fn extract_cover_art(path: &Path) -> Option<Vec<u8>> {
 
     None
 }
+
+/// Extract synchronized or plain lyrics from sidecar .lrc files or embedded tags.
+pub fn extract_lyrics(path: &Path) -> Option<Vec<(std::time::Duration, String)>> {
+    // 1. Sidecar .lrc file check
+    let lrc_path = path.with_extension("lrc");
+    if lrc_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&lrc_path) {
+            let parsed = parse_lrc(&content);
+            if !parsed.is_empty() {
+                return Some(parsed);
+            }
+        }
+    }
+
+    // 2. Embedded lyrics check
+    if let Ok(file) = std::fs::File::open(path) {
+        let mss = MediaSourceStream::new(Box::new(file), Default::default());
+        let mut hint = Hint::new();
+        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+            hint.with_extension(ext);
+        }
+
+        if let Ok(mut probed) = symphonia::default::get_probe().format(
+            &hint,
+            mss,
+            &FormatOptions::default(),
+            &MetadataOptions::default(),
+        ) {
+            let mut raw_lyrics = None;
+            if let Some(metadata) = probed.format.metadata().current() {
+                for tag in metadata.tags() {
+                    let key = tag.key.to_uppercase();
+                    if key.contains("LYRIC") || key.contains("USLT") {
+                        raw_lyrics = Some(tag.value.to_string());
+                        break;
+                    }
+                }
+            }
+
+            if let Some(text) = raw_lyrics {
+                let parsed = parse_lrc(&text);
+                if !parsed.is_empty() {
+                    return Some(parsed);
+                }
+                // Plain unsynced text fallback
+                let mut lines = Vec::new();
+                for (idx, line) in text.lines().enumerate() {
+                    let trimmed = line.trim();
+                    if !trimmed.is_empty() {
+                        lines.push((std::time::Duration::from_secs((idx * 3) as u64), trimmed.to_string()));
+                    }
+                }
+                if !lines.is_empty() {
+                    return Some(lines);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn parse_lrc(content: &str) -> Vec<(std::time::Duration, String)> {
+    let mut entries = Vec::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            if let Some(end_bracket) = line.find(']') {
+                let time_str = &line[1..end_bracket];
+                let text = line[end_bracket + 1..].trim();
+
+                // Format: mm:ss.xx or mm:ss
+                if let Some(colon) = time_str.find(':') {
+                    let mins_str = &time_str[..colon];
+                    let secs_str = &time_str[colon + 1..];
+
+                    if let (Ok(mins), Ok(secs)) = (mins_str.parse::<f64>(), secs_str.parse::<f64>()) {
+                        let total_secs = mins * 60.0 + secs;
+                        if total_secs >= 0.0 {
+                            entries.push((std::time::Duration::from_secs_f64(total_secs), text.to_string()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    entries.sort_by_key(|e| e.0);
+    entries
+}
