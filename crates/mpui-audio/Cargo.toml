@@ -14,3 +14,5 @@ parking_lot.workspace = true
 tracing.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
+[target.'cfg(target_os = "android")'.dependencies]
+cpal = { workspace = true, features = ["oboe-shared-stdcxx"] }
