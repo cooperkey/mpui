@@ -27,10 +27,25 @@ impl AudioOutput {
             .default_output_device()
             .context("no audio output device found")?;
 
-        let default_config = device.default_output_config()?;
+        let (def_channels, def_sample_rate) = if channels.is_some() && sample_rate.is_some() {
+            (2, 48000)
+        } else {
+            #[cfg(target_os = "android")]
+            {
+                (2, 48000)
+            }
+            #[cfg(not(target_os = "android"))]
+            {
+                match device.default_output_config() {
+                    Ok(conf) => (conf.channels(), conf.sample_rate().0),
+                    Err(_) => (2, 44100),
+                }
+            }
+        };
+
         let config = StreamConfig {
-            channels: channels.unwrap_or(default_config.channels()),
-            sample_rate: sample_rate.map(cpal::SampleRate).unwrap_or(default_config.sample_rate()),
+            channels: channels.unwrap_or(def_channels),
+            sample_rate: cpal::SampleRate(sample_rate.unwrap_or(def_sample_rate)),
             buffer_size: cpal::BufferSize::Default,
         };
 
@@ -89,18 +104,27 @@ mod tests {
     fn test_device_config() {
         let host = cpal::default_host();
         if let Some(device) = host.default_output_device() {
-            if let Ok(conf) = device.default_output_config() {
-                println!("Default device: {}, rate: {}, channels: {}", 
-                    device.name().unwrap_or_default(), 
-                    conf.sample_rate().0, 
-                    conf.channels());
-            }
-            if let Ok(ranges) = device.supported_output_configs() {
-                for r in ranges {
-                    println!("Supported: channels: {}, min: {}, max: {}, format: {:?}",
-                        r.channels(), r.min_sample_rate().0, r.max_sample_rate().0, r.sample_format());
-                }
-            }
+            let config = StreamConfig {
+                channels: 2,
+                sample_rate: cpal::SampleRate(48000),
+                buffer_size: cpal::BufferSize::Default,
+            };
+            let stream = device.build_output_stream(
+                &config,
+                move |_data: &mut [f32], _| {},
+                |err| eprintln!("err: {err}"),
+                None,
+            );
+            println!("Stream build result: {:?}", stream.is_ok());
+            assert!(stream.is_ok());
         }
+    }
+
+    #[test]
+    fn test_audio_output_new() {
+        let (_tx, rx) = crossbeam_channel::unbounded();
+        let out = AudioOutput::new(None, None, rx);
+        println!("AudioOutput::new result: {:?}", out.is_ok());
+        assert!(out.is_ok());
     }
 }
