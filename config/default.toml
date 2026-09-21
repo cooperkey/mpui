@@ -23,6 +23,7 @@ bar_width = 2
 bar_count = 0
 gravity = 1.8
 smoothing = 0.7
+sensitivity = 1.0
 fps = 30
 
 [equalizer]

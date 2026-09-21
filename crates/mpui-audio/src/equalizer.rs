@@ -120,6 +120,14 @@ impl Equalizer {
         self.enabled
     }
 
+    pub fn channels(&self) -> usize {
+        self.channels
+    }
+
+    pub fn sample_rate(&self) -> u32 {
+        self.sample_rate as u32
+    }
+
     /// Process interleaved audio samples in-place.
     pub fn process(&mut self, samples: &mut [f32]) {
         if !self.enabled {

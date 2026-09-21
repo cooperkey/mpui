@@ -121,6 +121,9 @@ impl StreamingDecoder {
             match self.decoder.decode(&packet) {
                 Ok(decoded) => {
                     let spec = *decoded.spec();
+                    self.sample_rate = spec.rate;
+                    self.channels = spec.channels.count();
+
                     let duration = decoded.capacity();
 
                     let mut sample_buf = SampleBuffer::<f32>::new(duration as u64, spec);
@@ -230,4 +233,17 @@ fn parse_gain(s: &str) -> Option<f32> {
     let s = s.trim();
     let cleaned = s.trim_end_matches(|c: char| c.is_alphabetic() || c.is_whitespace());
     cleaned.parse::<f32>().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_gain() {
+        assert_eq!(parse_gain("-3.2 dB"), Some(-3.2));
+        assert_eq!(parse_gain("+2.50 dB"), Some(2.50));
+        assert_eq!(parse_gain("0.0"), Some(0.0));
+        assert_eq!(parse_gain("none"), None);
+    }
 }

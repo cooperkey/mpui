@@ -71,8 +71,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
         }
     };
 
+    let sensitivity = app.config.visualizer.sensitivity as f32;
     let targets = if !spectrum.is_empty() {
-        bin_spectrum(&spectrum, num_bars, sample_rate)
+        bin_spectrum(&spectrum, num_bars, sample_rate, sensitivity)
     } else {
         vec![0.0; num_bars]
     };
@@ -137,7 +138,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
 }
 
 /// Compute logarithmic frequency bands with equal-loudness weighting and decibel scaling.
-pub fn bin_spectrum(spectrum: &[f32], num_bars: usize, sample_rate: f32) -> Vec<f32> {
+pub fn bin_spectrum(spectrum: &[f32], num_bars: usize, sample_rate: f32, sensitivity: f32) -> Vec<f32> {
     if num_bars == 0 || spectrum.is_empty() {
         return Vec::new();
     }
@@ -154,6 +155,7 @@ pub fn bin_spectrum(spectrum: &[f32], num_bars: usize, sample_rate: f32) -> Vec<
     }
 
     let log_ratio = (f_max / f_min).ln();
+    let sens = sensitivity.clamp(0.01, 10.0);
 
     (0..num_bars)
         .map(|i| {
@@ -178,11 +180,11 @@ pub fn bin_spectrum(spectrum: &[f32], num_bars: usize, sample_rate: f32) -> Vec<
 
             // Equal-loudness tilt weighting relative to 250 Hz
             let weight = (f_center / 250.0).powf(0.38).clamp(0.5, 5.0);
-            let weighted_mag = raw_mag * weight;
+            let weighted_mag = raw_mag * weight * sens;
 
-            // Decibel scaling: reference 8.0 (~0 dBFS peak in Parseval normalization)
-            let db = 20.0 * (weighted_mag / 8.0 + 1e-6).log10();
-            let min_db = -55.0;
+            // Decibel scaling: reference 10.0, dynamic range -45 dBFS to 0 dBFS
+            let db = 20.0 * (weighted_mag / 10.0 + 1e-6).log10();
+            let min_db = -45.0;
             let max_db = 0.0;
 
             ((db - min_db) / (max_db - min_db)).clamp(0.0, 1.0)
@@ -196,14 +198,14 @@ mod tests {
 
     #[test]
     fn test_bin_spectrum_empty() {
-        assert!(bin_spectrum(&[], 10, 44100.0).is_empty());
-        assert!(bin_spectrum(&[1.0; 1024], 0, 44100.0).is_empty());
+        assert!(bin_spectrum(&[], 10, 44100.0, 1.0).is_empty());
+        assert!(bin_spectrum(&[1.0; 1024], 0, 44100.0, 1.0).is_empty());
     }
 
     #[test]
     fn test_bin_spectrum_silence() {
         let spectrum = vec![0.0; 1024];
-        let bins = bin_spectrum(&spectrum, 20, 44100.0);
+        let bins = bin_spectrum(&spectrum, 20, 44100.0, 1.0);
         assert_eq!(bins.len(), 20);
         for val in bins {
             assert_eq!(val, 0.0);
@@ -218,11 +220,11 @@ mod tests {
         spectrum[1] = 4.0;
         spectrum[3] = 4.0;
 
-        let bins = bin_spectrum(&spectrum, 10, 44100.0);
+        let bins = bin_spectrum(&spectrum, 10, 44100.0, 1.0);
         assert_eq!(bins.len(), 10);
         // The lowest bars must detect the bass energy
-        assert!(bins[0] > 0.5, "Expected bar 0 to activate for 40Hz, got {}", bins[0]);
-        assert!(bins[1] > 0.5, "Expected bar 1 to activate for 60Hz, got {}", bins[1]);
+        assert!(bins[0] > 0.4, "Expected bar 0 to activate for 40Hz, got {}", bins[0]);
+        assert!(bins[1] > 0.4, "Expected bar 1 to activate for 60Hz, got {}", bins[1]);
         // Treble bars must be silent
         assert_eq!(bins[9], 0.0, "Expected treble bar to be 0 for bass, got {}", bins[9]);
     }
@@ -233,10 +235,10 @@ mod tests {
         // 10 kHz at 44100 Hz with N=2048: bin = round(10000 * 2048 / 44100) = 464
         spectrum[464] = 2.0;
 
-        let bins = bin_spectrum(&spectrum, 10, 44100.0);
+        let bins = bin_spectrum(&spectrum, 10, 44100.0, 1.0);
         assert_eq!(bins.len(), 10);
         // Treble bar must activate
-        assert!(bins[8] > 0.5 || bins[9] > 0.5, "Expected high bar to activate for 10kHz");
+        assert!(bins[8] > 0.4 || bins[9] > 0.4, "Expected high bar to activate for 10kHz");
         // Bass bar must be silent
         assert_eq!(bins[0], 0.0, "Expected bass bar to be 0 for 10kHz, got {}", bins[0]);
     }
@@ -250,9 +252,22 @@ mod tests {
         spectrum[116] = 1.0;
         spectrum[372] = 0.8;
 
-        let bins = bin_spectrum(&spectrum, 16, 44100.0);
+        let bins = bin_spectrum(&spectrum, 16, 44100.0, 1.0);
         assert_eq!(bins.len(), 16);
-        let active_count = bins.iter().filter(|&&v| v > 0.3).count();
+        let active_count = bins.iter().filter(|&&v| v > 0.25).count();
         assert!(active_count >= 4, "Expected at least 4 active bars across the spectrum, got {}", active_count);
+    }
+
+    #[test]
+    fn test_bin_spectrum_sensitivity_scaling() {
+        let mut spectrum = vec![0.0; 1024];
+        spectrum[23] = 2.0;
+
+        let normal = bin_spectrum(&spectrum, 10, 44100.0, 1.0);
+        let reduced = bin_spectrum(&spectrum, 10, 44100.0, 0.4);
+        let max_normal = normal.iter().copied().fold(0.0f32, f32::max);
+        let max_reduced = reduced.iter().copied().fold(0.0f32, f32::max);
+        assert!(max_normal > 0.3, "Normal must have active bars");
+        assert!(max_reduced < max_normal, "Lower sensitivity must produce smaller magnitude");
     }
 }

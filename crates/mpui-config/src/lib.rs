@@ -106,6 +106,7 @@ pub struct VisualizerConfig {
     pub bar_count: u16,
     pub gravity: f64,
     pub smoothing: f64,
+    pub sensitivity: f64,
     pub fps: u16,
     pub bar_chars: Vec<String>,
     pub color_gradient: Vec<String>,
@@ -120,6 +121,7 @@ impl Default for VisualizerConfig {
             bar_count: 0,
             gravity: 1.8,
             smoothing: 0.7,
+            sensitivity: 1.0,
             fps: 30,
             bar_chars: vec![
                 "\u{2581}".into(),
