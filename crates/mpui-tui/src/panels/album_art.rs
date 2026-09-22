@@ -70,11 +70,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
         app.theme.border
     };
 
-    let title = if active {
-        " [album art] "
-    } else {
-        " album art "
-    };
+    let title = app.panel_title("album art", "focus_album_art", active);
 
     let block = Block::default()
         .title(title)

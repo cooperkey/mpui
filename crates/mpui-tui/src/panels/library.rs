@@ -15,11 +15,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
         app.theme.border
     };
 
-    let title = if is_focused {
-        " [library] "
-    } else {
-        " library "
-    };
+    let title = app.panel_title("library", "focus_library", is_focused);
 
     let block = Block::default()
         .title(title)

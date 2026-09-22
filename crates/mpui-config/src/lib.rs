@@ -359,6 +359,7 @@ fn default_keybindings() -> HashMap<String, String> {
         ("e", "toggle_equalizer"),
         ("c", "toggle_album_art"),
         ("z z", "center_current"),
+        (".", "jump_to_current"),
         ("c-d", "scroll_half_down"),
         ("c-u", "scroll_half_up"),
         ("0", "seek_start"),

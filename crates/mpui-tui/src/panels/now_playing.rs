@@ -12,6 +12,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let track_info = app
         .queue
         .current_track()
+        .or(app.current_playing_track)
         .and_then(|id| app.library.get(id));
 
     let title = track_info

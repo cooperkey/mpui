@@ -13,11 +13,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         app.theme.border
     };
 
-    let title = if active {
-        " [equalizer] "
-    } else {
-        " equalizer "
-    };
+    let title = app.panel_title("equalizer", "focus_equalizer", active);
 
     let block = Block::default()
         .title(title)

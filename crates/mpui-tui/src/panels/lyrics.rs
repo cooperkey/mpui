@@ -15,11 +15,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         app.theme.border
     };
 
-    let title = if is_focused {
-        " [lyrics] "
-    } else {
-        " lyrics "
-    };
+    let title = app.panel_title("lyrics", "focus_lyrics", is_focused);
 
     let block = Block::default()
         .title(title)

@@ -52,6 +52,7 @@ pub enum KeyAction {
     ToggleAlbumArt,
     ToggleLyrics,
     CenterCurrent,
+    JumpToCurrent,
     ScrollHalfDown,
     ScrollHalfUp,
     ToggleHelp,
@@ -102,6 +103,7 @@ fn resolve_action(key_str: &str, config: &mpui_config::Config) -> Option<KeyActi
             "toggle_album_art" => Some(KeyAction::ToggleAlbumArt),
             "toggle_lyrics" => Some(KeyAction::ToggleLyrics),
             "center_current" => Some(KeyAction::CenterCurrent),
+            "jump_to_current" | "center_library" => Some(KeyAction::JumpToCurrent),
             "scroll_half_down" => Some(KeyAction::ScrollHalfDown),
             "scroll_half_up" => Some(KeyAction::ScrollHalfUp),
             "toggle_help" => Some(KeyAction::ToggleHelp),
@@ -146,6 +148,7 @@ fn resolve_action(key_str: &str, config: &mpui_config::Config) -> Option<KeyActi
         "5" => Some(KeyAction::FocusAlbumArt),
         "6" => Some(KeyAction::FocusMetadata),
         "7" => Some(KeyAction::FocusLyrics),
+        "." => Some(KeyAction::JumpToCurrent),
         "?" | "f1" => Some(KeyAction::ToggleHelp),
         _ => None,
     }
@@ -215,10 +218,38 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
             | KeyCode::Enter
             | KeyCode::F(1) => {
                 app.show_help = false;
-                return;
+                app.help_scroll = 0;
             }
-            _ => {}
+            KeyCode::Down | KeyCode::Char('j') => {
+                app.help_scroll = app.help_scroll.saturating_add(1);
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                app.help_scroll = app.help_scroll.saturating_sub(1);
+            }
+            KeyCode::PageDown => {
+                app.help_scroll = app.help_scroll.saturating_add(5);
+            }
+            KeyCode::PageUp => {
+                app.help_scroll = app.help_scroll.saturating_sub(5);
+            }
+            KeyCode::Home => {
+                app.help_scroll = 0;
+            }
+            _ => {
+                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                    match key.code {
+                        KeyCode::Char('d') => {
+                            app.help_scroll = app.help_scroll.saturating_add(5);
+                        }
+                        KeyCode::Char('u') => {
+                            app.help_scroll = app.help_scroll.saturating_sub(5);
+                        }
+                        _ => {}
+                    }
+                }
+            }
         }
+        return;
     }
 
     let key_str = key_event_to_string(&key);
@@ -347,40 +378,48 @@ fn execute_action(app: &mut App, action: KeyAction) {
             }
         }
         KeyAction::NextTrack => {
-            let next_id = match app.repeat_mode {
-                mpui_config::types::RepeatMode::Queue => {
-                    if let Some(id) = app.queue.next() {
-                        Some(id)
-                    } else if !app.queue.is_empty() {
-                        app.queue.set_current(0);
-                        app.queue.current_track()
-                    } else {
-                        None
+            if !app.queue.is_empty() {
+                let next_id = match app.repeat_mode {
+                    mpui_config::types::RepeatMode::Queue => {
+                        if let Some(id) = app.queue.next() {
+                            Some(id)
+                        } else if !app.queue.is_empty() {
+                            app.queue.set_current(0);
+                            app.queue.current_track()
+                        } else {
+                            None
+                        }
                     }
+                    _ => app.queue.next(),
+                };
+                if let Some(id) = next_id {
+                    app.play_track_at_index(id);
                 }
-                _ => app.queue.next(),
-            };
-            if let Some(id) = next_id {
-                app.play_track_at_index(id);
+            } else {
+                app.advance_library(true);
             }
         }
         KeyAction::PrevTrack => {
-            let prev_id = match app.repeat_mode {
-                mpui_config::types::RepeatMode::Queue => {
-                    if let Some(id) = app.queue.prev() {
-                        Some(id)
-                    } else if !app.queue.is_empty() {
-                        let last = app.queue.len() - 1;
-                        app.queue.set_current(last);
-                        app.queue.current_track()
-                    } else {
-                        None
+            if !app.queue.is_empty() {
+                let prev_id = match app.repeat_mode {
+                    mpui_config::types::RepeatMode::Queue => {
+                        if let Some(id) = app.queue.prev() {
+                            Some(id)
+                        } else if !app.queue.is_empty() {
+                            let last = app.queue.len() - 1;
+                            app.queue.set_current(last);
+                            app.queue.current_track()
+                        } else {
+                            None
+                        }
                     }
+                    _ => app.queue.prev(),
+                };
+                if let Some(id) = prev_id {
+                    app.play_track_at_index(id);
                 }
-                _ => app.queue.prev(),
-            };
-            if let Some(id) = prev_id {
-                app.play_track_at_index(id);
+            } else {
+                app.advance_library(false);
             }
         }
         KeyAction::ToggleVisualizer => app.show_visualizer = !app.show_visualizer,
@@ -393,6 +432,16 @@ fn execute_action(app: &mut App, action: KeyAction) {
         KeyAction::MuteToggle => app.toggle_mute(),
         KeyAction::ShuffleToggle => app.toggle_shuffle(),
         KeyAction::RepeatCycle => app.cycle_repeat(),
+        KeyAction::JumpToCurrent => {
+            let cur_id = app.current_playing_track.or_else(|| app.queue.current_track());
+            if let Some(id) = cur_id {
+                if let Some(idx) = app.library.track_ids().iter().position(|&t| t == id) {
+                    app.library_cursor = idx;
+                    app.focused_panel = FocusedPanel::Library;
+                    app.metadata_scroll = 0;
+                }
+            }
+        }
         KeyAction::CenterCurrent => match app.focused_panel {
             FocusedPanel::Queue => {
                 if let Some(idx) = app.queue.current_index() {
@@ -400,8 +449,9 @@ fn execute_action(app: &mut App, action: KeyAction) {
                 }
             }
             FocusedPanel::Library => {
-                if let Some(cur_id) = app.queue.current_track() {
-                    if let Some(idx) = app.library.track_ids().iter().position(|&id| id == cur_id) {
+                let cur_id = app.current_playing_track.or_else(|| app.queue.current_track());
+                if let Some(id) = cur_id {
+                    if let Some(idx) = app.library.track_ids().iter().position(|&t| t == id) {
                         app.library_cursor = idx;
                     }
                 }
@@ -434,6 +484,12 @@ fn handle_command_mode(app: &mut App, key: KeyEvent) {
             execute_command(app, &cmd);
             app.input_mode = InputMode::Normal;
             app.command_buffer.clear();
+        }
+        KeyCode::Tab => {
+            let suggestion = crate::command::get_suggestion(&app.command_buffer);
+            if let Some(completion) = suggestion.completion {
+                app.command_buffer = completion;
+            }
         }
         KeyCode::Backspace => {
             app.command_buffer.pop();
@@ -914,6 +970,93 @@ mod tests {
 
         handle_key(&mut app, key_press(KeyCode::Char('[')));
         assert_eq!(app.focused_panel, FocusedPanel::Library);
+    }
+
+    fn create_dummy_track(id: u64, path: &str, title: &str) -> mpui_core::track::Track {
+        mpui_core::track::Track {
+            id: mpui_core::track::TrackId(id),
+            path: std::path::PathBuf::from(path),
+            title: Some(title.to_string()),
+            artist: None,
+            album: None,
+            album_artist: None,
+            genre: None,
+            year: None,
+            track_number: None,
+            disc_number: None,
+            duration: None,
+            sample_rate: None,
+            channels: None,
+            bitrate: None,
+            format: "mp3".to_string(),
+            replay_gain_track: None,
+            replay_gain_album: None,
+        }
+    }
+
+    #[test]
+    fn test_dot_shortcut_jumps_to_current_playing_track_in_library() {
+        let mut app = create_test_app();
+        let track1 = create_dummy_track(10, "/music/song1.mp3", "Song 1");
+        let track2 = create_dummy_track(20, "/music/song2.mp3", "Song 2");
+
+        app.library.insert(track1);
+        app.library.insert(track2);
+        app.current_playing_track = Some(mpui_core::track::TrackId(20));
+
+        // Switch to Equalizer panel
+        app.focused_panel = FocusedPanel::Equalizer;
+        assert_eq!(app.library_cursor, 0);
+
+        // Press "."
+        handle_key(&mut app, key_press(KeyCode::Char('.')));
+        assert_eq!(app.focused_panel, FocusedPanel::Library);
+        assert_eq!(app.library_cursor, 1);
+    }
+
+    #[test]
+    fn test_command_mode_tab_completion() {
+        let mut app = create_test_app();
+        
+        // Enter command mode
+        handle_key(&mut app, key_press(KeyCode::Char(':')));
+        assert_eq!(app.input_mode, InputMode::Command);
+
+        // Type 'v', 'o'
+        handle_key(&mut app, key_press(KeyCode::Char('v')));
+        handle_key(&mut app, key_press(KeyCode::Char('o')));
+        assert_eq!(app.command_buffer, "vo");
+
+        // Tab completes to "vol "
+        handle_key(&mut app, key_press(KeyCode::Tab));
+        assert_eq!(app.command_buffer, "vol ");
+
+        // Reset and test argument completion
+        app.command_buffer = "sort ar".to_string();
+        handle_key(&mut app, key_press(KeyCode::Tab));
+        assert_eq!(app.command_buffer, "sort artist");
+    }
+
+    #[test]
+    fn test_help_modal_scrolling() {
+        let mut app = create_test_app();
+        app.show_help = true;
+        assert_eq!(app.help_scroll, 0);
+
+        handle_key(&mut app, key_press(KeyCode::Char('j')));
+        assert_eq!(app.help_scroll, 1);
+
+        handle_key(&mut app, key_press(KeyCode::Down));
+        assert_eq!(app.help_scroll, 2);
+
+        handle_key(&mut app, key_press(KeyCode::Char('k')));
+        assert_eq!(app.help_scroll, 1);
+
+        handle_key(&mut app, key_press(KeyCode::Up));
+        assert_eq!(app.help_scroll, 0);
+
+        handle_key(&mut app, key_press(KeyCode::Esc));
+        assert!(!app.show_help);
     }
 }
 

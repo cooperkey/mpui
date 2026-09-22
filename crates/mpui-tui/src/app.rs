@@ -96,6 +96,8 @@ pub struct App {
     pub current_lyrics: Option<Vec<(std::time::Duration, String)>>,
     pub visualizer_bars: Vec<f32>,
     pub show_help: bool,
+    pub help_scroll: u16,
+    pub current_playing_track: Option<mpui_core::track::TrackId>,
 
     pub art_cache: ArtCache,
     pub art_cache_order: std::collections::VecDeque<(mpui_core::track::TrackId, u16, u16)>,
@@ -191,6 +193,8 @@ impl App {
             current_lyrics: None,
             visualizer_bars: Vec::new(),
             show_help: false,
+            help_scroll: 0,
+            current_playing_track: None,
             art_cache: std::collections::HashMap::with_capacity(128),
             art_cache_order: std::collections::VecDeque::with_capacity(128),
             art_request_tx: art_tx,
@@ -235,8 +239,10 @@ impl App {
             self.playback.lock().paused = true;
             let _ = self.command_tx.send(PlayerCommand::Pause);
         } else {
-            // Stopped: start playback with current queue track or selected track
+            // Stopped: start playback with current queue track, playing track, or selected track
             if let Some(id) = self.queue.current_track() {
+                self.play_track_at_index(id);
+            } else if let Some(id) = self.current_playing_track {
                 self.play_track_at_index(id);
             } else if let Some(id) = self.selected_track_id() {
                 self.play_track_at_index(id);
@@ -325,6 +331,10 @@ impl App {
             return Some(id);
         }
 
+        if let Some(id) = self.current_playing_track {
+            return Some(id);
+        }
+
         if let Some(&id) = self.queue.items().get(self.queue_cursor) {
             return Some(id);
         }
@@ -333,7 +343,8 @@ impl App {
     }
 
     pub fn play_track_at_index(&mut self, id: mpui_core::track::TrackId) {
-        if self.queue.current_track() != Some(id) {
+        self.current_playing_track = Some(id);
+        if !self.queue.is_empty() {
             if let Some(pos) = self.queue.items().iter().position(|&t| t == id) {
                 self.queue.set_current(pos);
             } else {
@@ -355,6 +366,96 @@ impl App {
         }
     }
 
+    pub fn advance_library(&mut self, forward: bool) -> bool {
+        let ids = self.library.track_ids();
+        if ids.is_empty() {
+            return false;
+        }
+
+        let current_id = self.current_playing_track;
+        let next_id = match self.repeat_mode {
+            mpui_config::types::RepeatMode::Track => current_id.or_else(|| ids.first().copied()),
+            mpui_config::types::RepeatMode::Queue => {
+                if let Some(cur) = current_id {
+                    if let Some(idx) = ids.iter().position(|&id| id == cur) {
+                        if forward {
+                            let next_idx = (idx + 1) % ids.len();
+                            Some(ids[next_idx])
+                        } else {
+                            let prev_idx = if idx == 0 { ids.len() - 1 } else { idx - 1 };
+                            Some(ids[prev_idx])
+                        }
+                    } else {
+                        ids.first().copied()
+                    }
+                } else {
+                    ids.first().copied()
+                }
+            }
+            mpui_config::types::RepeatMode::Off => {
+                if let Some(cur) = current_id {
+                    if let Some(idx) = ids.iter().position(|&id| id == cur) {
+                        if forward {
+                            if idx + 1 < ids.len() {
+                                Some(ids[idx + 1])
+                            } else {
+                                None
+                            }
+                        } else {
+                            if idx > 0 {
+                                Some(ids[idx - 1])
+                            } else {
+                                None
+                            }
+                        }
+                    } else {
+                        ids.first().copied()
+                    }
+                } else {
+                    ids.first().copied()
+                }
+            }
+        };
+
+        if let Some(id) = next_id {
+            self.play_track_at_index(id);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn panel_title(&self, name: &str, action: &str, is_focused: bool) -> String {
+        let mut candidates: Vec<&str> = self
+            .config
+            .keybindings
+            .iter()
+            .filter_map(|(k, v)| {
+                let matches = v == action
+                    || (action == "focus_metadata"
+                        && (v == "focus_info" || v == "focus_track_info"));
+                if matches {
+                    Some(k.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        candidates.sort_by_key(|k| {
+            let is_digit = k.len() == 1 && k.chars().next().unwrap().is_ascii_digit();
+            (!is_digit, k.len(), *k)
+        });
+
+        let shortcut = candidates.first().copied();
+        match (shortcut, is_focused) {
+            (Some(k), true) => format!(" [{name}][{k}] "),
+            (Some(k), false) => format!(" {name} [{k}] "),
+            (None, true) => format!(" [{name}] "),
+            (None, false) => format!(" {name} "),
+        }
+    }
+
     pub fn handle_playback_events(&mut self) {
         while let Ok(event) = self.event_rx.try_recv() {
             match event {
@@ -366,14 +467,24 @@ impl App {
     }
 
     pub fn on_track_ended(&mut self) {
-        if let Some(next_id) = self.queue.advance(self.repeat_mode) {
-            self.play_track_at_index(next_id);
+        if !self.queue.is_empty() {
+            if let Some(next_id) = self.queue.advance(self.repeat_mode) {
+                self.play_track_at_index(next_id);
+            } else {
+                let mut state = self.playback.lock();
+                state.playing = false;
+                state.paused = false;
+                state.position = std::time::Duration::ZERO;
+                self.spectrum.lock().clear();
+            }
         } else {
-            let mut state = self.playback.lock();
-            state.playing = false;
-            state.paused = false;
-            state.position = std::time::Duration::ZERO;
-            self.spectrum.lock().clear();
+            if !self.advance_library(true) {
+                let mut state = self.playback.lock();
+                state.playing = false;
+                state.paused = false;
+                state.position = std::time::Duration::ZERO;
+                self.spectrum.lock().clear();
+            }
         }
     }
 }
@@ -480,5 +591,81 @@ mod tests {
         assert!(!app.queue.is_shuffled());
         assert_eq!(app.queue.current_track(), Some(mpui_core::track::TrackId(3)));
         assert_eq!(app.queue.current_index(), Some(2));
+    }
+
+    fn create_dummy_track(id: u64, path: &str, title: &str) -> mpui_core::track::Track {
+        mpui_core::track::Track {
+            id: mpui_core::track::TrackId(id),
+            path: std::path::PathBuf::from(path),
+            title: Some(title.to_string()),
+            artist: Some("Artist".to_string()),
+            album: None,
+            album_artist: None,
+            genre: None,
+            year: None,
+            track_number: None,
+            disc_number: None,
+            duration: Some(std::time::Duration::from_secs(180)),
+            sample_rate: None,
+            channels: None,
+            bitrate: None,
+            format: "mp3".to_string(),
+            replay_gain_track: None,
+            replay_gain_album: None,
+        }
+    }
+
+    #[test]
+    fn test_empty_queue_library_order_playback() {
+        let (mut app, _event_tx, _cmd_rx) = create_test_app();
+        let track1 = create_dummy_track(1, "/music/song1.mp3", "Song 1");
+        let track2 = create_dummy_track(2, "/music/song2.mp3", "Song 2");
+
+        app.library.insert(track1);
+        app.library.insert(track2);
+        assert!(app.queue.is_empty());
+
+        // Play track 1 directly with empty queue
+        app.play_track_at_index(mpui_core::track::TrackId(1));
+        assert!(app.queue.is_empty());
+        assert_eq!(app.current_playing_track, Some(mpui_core::track::TrackId(1)));
+
+        // Advance library forward
+        assert!(app.advance_library(true));
+        assert!(app.queue.is_empty());
+        assert_eq!(app.current_playing_track, Some(mpui_core::track::TrackId(2)));
+
+        // Advance at end in RepeatMode::Off returns false
+        app.repeat_mode = RepeatMode::Off;
+        assert!(!app.advance_library(true));
+
+        // Advance at end in RepeatMode::Queue wraps back to track 1
+        app.repeat_mode = RepeatMode::Queue;
+        assert!(app.advance_library(true));
+        assert_eq!(app.current_playing_track, Some(mpui_core::track::TrackId(1)));
+
+        // Advance backward in RepeatMode::Queue wraps to track 2
+        assert!(app.advance_library(false));
+        assert_eq!(app.current_playing_track, Some(mpui_core::track::TrackId(2)));
+    }
+
+    #[test]
+    fn test_panel_title_dynamic_config_shortcuts() {
+        let (mut app, _event_tx, _cmd_rx) = create_test_app();
+        
+        // Default binding for focus_library is "1"
+        assert_eq!(app.panel_title("library", "focus_library", true), " [library][1] ");
+        assert_eq!(app.panel_title("library", "focus_library", false), " library [1] ");
+
+        // Reconfigure to "0"
+        app.config.keybindings.insert("0".to_string(), "focus_library".to_string());
+        app.config.keybindings.remove("1");
+        assert_eq!(app.panel_title("library", "focus_library", true), " [library][0] ");
+        assert_eq!(app.panel_title("library", "focus_library", false), " library [0] ");
+
+        // Reconfigure equalizer to "e"
+        app.config.keybindings.insert("e".to_string(), "focus_equalizer".to_string());
+        app.config.keybindings.remove("4");
+        assert_eq!(app.panel_title("equalizer", "focus_equalizer", true), " [equalizer][e] ");
     }
 }

@@ -29,25 +29,44 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         crate::app::InputMode::Search => "/",
     };
 
-    let input_display = match app.input_mode {
-        crate::app::InputMode::Command => format!(":{}", app.command_buffer),
-        crate::app::InputMode::Search => format!("/{}", app.search_query),
-        _ => String::new(),
+    let (input_spans, input_len) = match app.input_mode {
+        crate::app::InputMode::Command => {
+            let suggestion = crate::command::get_suggestion(&app.command_buffer);
+            let cmd_text = format!(":{}", app.command_buffer);
+            let ghost_text = suggestion.ghost;
+            let hint_text = suggestion.hint;
+            let total_len = cmd_text.len() + ghost_text.len() + hint_text.len();
+            (
+                vec![
+                    Span::styled(cmd_text, Style::default().fg(app.theme.fg)),
+                    Span::styled(ghost_text, Style::default().fg(app.theme.muted_fg)),
+                    Span::styled(hint_text, Style::default().fg(app.theme.muted_fg)),
+                ],
+                total_len,
+            )
+        }
+        crate::app::InputMode::Search => {
+            let search_text = format!("/{}", app.search_query);
+            let len = search_text.len();
+            (
+                vec![Span::styled(search_text, Style::default().fg(app.theme.fg))],
+                len,
+            )
+        }
+        _ => (vec![], 0),
     };
 
     let left_str = format!(" {vol}  {repeat}  {shuffle} ");
     let help_hint = "?: help ";
-    let used_width = left_str.len() + input_display.len() + help_hint.len();
+    let used_width = left_str.len() + input_len + help_hint.len();
     let pad_len = (area.width as usize).saturating_sub(used_width);
     let padding = " ".repeat(pad_len);
 
-    let line = Line::from(vec![
-        Span::styled(left_str, Style::default().fg(app.theme.muted_fg)),
-        Span::styled(input_display, Style::default().fg(app.theme.fg)),
-        Span::raw(padding),
-        Span::styled(help_hint, Style::default().fg(app.theme.muted_fg)),
-    ]);
+    let mut line_spans = vec![Span::styled(left_str, Style::default().fg(app.theme.muted_fg))];
+    line_spans.extend(input_spans);
+    line_spans.push(Span::raw(padding));
+    line_spans.push(Span::styled(help_hint, Style::default().fg(app.theme.muted_fg)));
 
-    let paragraph = Paragraph::new(line);
+    let paragraph = Paragraph::new(Line::from(line_spans));
     frame.render_widget(paragraph, area);
 }

@@ -15,11 +15,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         app.theme.border
     };
 
-    let title = if active {
-        " [metadata] "
-    } else {
-        " metadata "
-    };
+    let title = app.panel_title("metadata", "focus_metadata", active);
 
     let block = Block::default()
         .title(title)

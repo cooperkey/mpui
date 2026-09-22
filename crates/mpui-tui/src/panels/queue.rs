@@ -15,11 +15,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
         app.theme.border
     };
 
-    let title = if is_focused {
-        " [queue] "
-    } else {
-        " queue "
-    };
+    let title = app.panel_title("queue", "focus_queue", is_focused);
 
     let block = Block::default()
         .title(title)

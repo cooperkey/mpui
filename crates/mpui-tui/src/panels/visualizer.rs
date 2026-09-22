@@ -15,11 +15,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
         app.theme.border
     };
 
-    let title = if is_focused {
-        " [visualizer] "
-    } else {
-        " visualizer "
-    };
+    let title = app.panel_title("visualizer", "focus_visualizer", is_focused);
 
     let block = Block::default()
         .title(title)
