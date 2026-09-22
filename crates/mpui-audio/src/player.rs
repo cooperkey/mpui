@@ -61,7 +61,7 @@ pub struct Player {
 impl Player {
     pub fn new() -> Self {
         let (command_tx, command_rx) = crossbeam_channel::unbounded();
-        let (sample_tx, sample_rx) = crossbeam_channel::bounded(64);
+        let (sample_tx, sample_rx) = crossbeam_channel::bounded(8);
         let analyzer = SpectrumAnalyzer::new(2048);
         let spectrum = analyzer.spectrum_handle();
 
@@ -98,6 +98,11 @@ impl Player {
             let mut handle_cmd = |cmd: PlayerCommand| {
                 match cmd {
                     PlayerCommand::Play(path) => {
+                        while self.sample_rx.try_recv().is_ok() {}
+                        if let Some(ref out) = audio_output {
+                            out.flush();
+                            let _ = out.resume();
+                        }
                         if let Ok(dec) = StreamingDecoder::new(&path) {
                             let (duration, sample_rate, channels) = (dec.total_duration, dec.sample_rate, dec.channels);
                             replaygain_factor = calculate_replaygain(&dec, &replaygain_mode);
@@ -134,9 +139,15 @@ impl Player {
                     }
                     PlayerCommand::Pause => {
                         self.state.lock().paused = true;
+                        if let Some(ref out) = audio_output {
+                            let _ = out.pause();
+                        }
                     }
                     PlayerCommand::Resume => {
                         self.state.lock().paused = false;
+                        if let Some(ref out) = audio_output {
+                            let _ = out.resume();
+                        }
                     }
                     PlayerCommand::Stop => {
                         decoder = None;
@@ -145,8 +156,17 @@ impl Player {
                         state.paused = false;
                         state.position = Duration::ZERO;
                         self.spectrum.lock().clear();
+                        while self.sample_rx.try_recv().is_ok() {}
+                        if let Some(ref out) = audio_output {
+                            out.flush();
+                            let _ = out.pause();
+                        }
                     }
                     PlayerCommand::Seek(duration) => {
+                        while self.sample_rx.try_recv().is_ok() {}
+                        if let Some(ref out) = audio_output {
+                            out.flush();
+                        }
                         if let Some(ref mut dec) = decoder {
                             let _ = dec.seek(duration);
                             current_samples_decoded = (duration.as_secs_f64() * dec.sample_rate as f64) as u64;

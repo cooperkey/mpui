@@ -35,12 +35,17 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         _ => String::new(),
     };
 
+    let left_str = format!(" {vol}  {repeat}  {shuffle} ");
+    let help_hint = "?: help ";
+    let used_width = left_str.len() + input_display.len() + help_hint.len();
+    let pad_len = (area.width as usize).saturating_sub(used_width);
+    let padding = " ".repeat(pad_len);
+
     let line = Line::from(vec![
-        Span::styled(
-            format!(" {vol}  {repeat}  {shuffle} "),
-            Style::default().fg(app.theme.muted_fg),
-        ),
+        Span::styled(left_str, Style::default().fg(app.theme.muted_fg)),
         Span::styled(input_display, Style::default().fg(app.theme.fg)),
+        Span::raw(padding),
+        Span::styled(help_hint, Style::default().fg(app.theme.muted_fg)),
     ]);
 
     let paragraph = Paragraph::new(line);

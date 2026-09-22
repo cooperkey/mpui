@@ -17,13 +17,14 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     // Floating overlays render atop base panels
     panels::search::render(frame, size, app);
+    panels::help::render(frame, size, app);
 }
 
 fn render_narrow(frame: &mut Frame, size: Rect, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(2), // now playing
+            Constraint::Length(3), // now playing
             Constraint::Min(1),    // primary view based on focus
             Constraint::Length(1), // status
         ])
@@ -44,79 +45,115 @@ fn render_narrow(frame: &mut Frame, size: Rect, app: &mut App) {
 }
 
 fn render_widescreen(frame: &mut Frame, size: Rect, app: &mut App) {
-    // Top-level horizontal split: library/queue (left 38%) | player/dsp (right 62%)
-    let main_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(38), Constraint::Percentage(62)])
+    // Outer vertical layout: Full-width header (3) + Center workspace (Min 1) + Full-width footer (1)
+    let outer_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // now playing with progress line
+            Constraint::Min(1),    // center content
+            Constraint::Length(1), // status
+        ])
         .split(size);
 
-    // Left column: Library + Queue
+    panels::now_playing::render(frame, outer_chunks[0], app);
+    panels::status::render(frame, outer_chunks[2], app);
+
+    // Center workspace split horizontally:
+    // Left column (62%): Library + Queue (wide landscape rectangle: length > height)
+    // Right column (38%): Album art (square on the side) + dynamic DSP panels (visualizer/eq/lyrics)
+    let center_cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(62), Constraint::Percentage(38)])
+        .split(outer_chunks[1]);
+
+    // Left Column: Library & Queue
     if app.show_queue {
         let left_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
-            .split(main_chunks[0]);
+            .split(center_cols[0]);
         panels::library::render(frame, left_chunks[0], app);
         panels::queue::render(frame, left_chunks[1], app);
     } else {
-        panels::library::render(frame, main_chunks[0], app);
+        panels::library::render(frame, center_cols[0], app);
     }
 
-    // Right column: Fixed header (2) + dynamic middle panels + fixed footer (1)
-    let right_outer = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(2), // now playing
-            Constraint::Min(1),    // dynamic content
-            Constraint::Length(1), // status
-        ])
-        .split(main_chunks[1]);
+    // Right Column: Album art (square on the side) + dynamic DSP panels
+    let right_area = center_cols[1];
 
-    panels::now_playing::render(frame, right_outer[0], app);
-    panels::status::render(frame, right_outer[2], app);
-
-    // Collect visible panels on the right side
-    enum RightPanel {
+    enum DspPanel {
         Lyrics,
-        AlbumArt,
         Visualizer,
         Equalizer,
     }
 
-    let mut visible = Vec::new();
+    let mut dsp_panels = Vec::new();
     if app.show_lyrics {
-        visible.push(RightPanel::Lyrics);
-    }
-    if app.show_album_art {
-        visible.push(RightPanel::AlbumArt);
+        dsp_panels.push(DspPanel::Lyrics);
     }
     if app.show_visualizer {
-        visible.push(RightPanel::Visualizer);
+        dsp_panels.push(DspPanel::Visualizer);
     }
     if app.show_equalizer {
-        visible.push(RightPanel::Equalizer);
+        dsp_panels.push(DspPanel::Equalizer);
     }
 
-    if visible.is_empty() {
-        return;
-    }
+    if app.show_album_art && !dsp_panels.is_empty() {
+        let dsp_count = dsp_panels.len();
+        let max_art_height = match dsp_count {
+            1 => 13,
+            2 => 10,
+            _ => 8,
+        };
+        let fair_share = (right_area.height as usize / (dsp_count + 1)) as u16;
+        let square_height = fair_share.clamp(7, max_art_height);
 
-    let constraints: Vec<Constraint> = visible
-        .iter()
-        .map(|_| Constraint::Ratio(1, visible.len() as u32))
-        .collect();
+        let right_splits = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(square_height), // compact square album art
+                Constraint::Min(1),                 // generous room for visualizer & equalizer
+            ])
+            .split(right_area);
 
-    let content_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(constraints)
-        .split(right_outer[1]);
+        panels::album_art::render(frame, right_splits[0], app);
 
-    for (panel, chunk) in visible.into_iter().zip(content_chunks.iter()) {
-        match panel {
-            RightPanel::Lyrics => panels::lyrics::render(frame, *chunk, app),
-            RightPanel::AlbumArt => panels::album_art::render(frame, *chunk, app),
-            RightPanel::Visualizer => panels::visualizer::render(frame, *chunk, app),
-            RightPanel::Equalizer => panels::equalizer::render(frame, *chunk, app),
+        let dsp_constraints: Vec<Constraint> = dsp_panels
+            .iter()
+            .map(|_| Constraint::Ratio(1, dsp_panels.len() as u32))
+            .collect();
+
+        let dsp_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(dsp_constraints)
+            .split(right_splits[1]);
+
+        for (panel, chunk) in dsp_panels.into_iter().zip(dsp_chunks.iter()) {
+            match panel {
+                DspPanel::Lyrics => panels::lyrics::render(frame, *chunk, app),
+                DspPanel::Visualizer => panels::visualizer::render(frame, *chunk, app),
+                DspPanel::Equalizer => panels::equalizer::render(frame, *chunk, app),
+            }
+        }
+    } else if app.show_album_art {
+        panels::album_art::render(frame, right_area, app);
+    } else if !dsp_panels.is_empty() {
+        let dsp_constraints: Vec<Constraint> = dsp_panels
+            .iter()
+            .map(|_| Constraint::Ratio(1, dsp_panels.len() as u32))
+            .collect();
+
+        let dsp_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(dsp_constraints)
+            .split(right_area);
+
+        for (panel, chunk) in dsp_panels.into_iter().zip(dsp_chunks.iter()) {
+            match panel {
+                DspPanel::Lyrics => panels::lyrics::render(frame, *chunk, app),
+                DspPanel::Visualizer => panels::visualizer::render(frame, *chunk, app),
+                DspPanel::Equalizer => panels::equalizer::render(frame, *chunk, app),
+            }
         }
     }
 }

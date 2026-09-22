@@ -37,6 +37,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
                 Span::styled(track.display_title(), Style::default().fg(app.theme.fg)),
                 Span::raw("  "),
                 Span::styled(track.display_duration(), Style::default().fg(app.theme.muted_fg)),
+                Span::raw("  "),
+                Span::styled(
+                    format!("[{}]", track.path.display()),
+                    Style::default().fg(app.theme.muted_fg),
+                ),
             ]);
 
             ListItem::new(line)

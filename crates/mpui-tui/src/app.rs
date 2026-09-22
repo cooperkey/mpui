@@ -73,6 +73,7 @@ pub struct App {
     pub show_lyrics: bool,
     pub current_lyrics: Option<Vec<(std::time::Duration, String)>>,
     pub visualizer_bars: Vec<f32>,
+    pub show_help: bool,
 }
 
 impl App {
@@ -122,6 +123,7 @@ impl App {
             show_lyrics: false,
             current_lyrics: None,
             visualizer_bars: Vec::new(),
+            show_help: false,
         }
     }
 
@@ -149,10 +151,12 @@ impl App {
     }
 
     pub fn toggle_pause(&mut self) {
-        let state = self.playback.lock();
+        let mut state = self.playback.lock();
         if state.paused {
+            state.paused = false;
             let _ = self.command_tx.send(PlayerCommand::Resume);
         } else if state.playing {
+            state.paused = true;
             let _ = self.command_tx.send(PlayerCommand::Pause);
         }
     }

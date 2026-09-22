@@ -7,9 +7,10 @@ use std::sync::Arc;
 
 /// Audio output stream wrapping cpal.
 pub struct AudioOutput {
-    _stream: Stream,
+    stream: Stream,
     pub sample_rate: u32,
     pub channels: u16,
+    pub buffer: Arc<Mutex<Vec<f32>>>,
 }
 
 impl AudioOutput {
@@ -89,10 +90,26 @@ impl AudioOutput {
         let channels = config.channels;
 
         Ok(Self {
-            _stream: stream,
+            stream,
             sample_rate,
             channels,
+            buffer,
         })
+    }
+
+    /// Pause output stream playback at the hardware device level.
+    pub fn pause(&self) -> Result<()> {
+        self.stream.pause().context("failed to pause audio stream")
+    }
+
+    /// Resume output stream playback at the hardware device level.
+    pub fn resume(&self) -> Result<()> {
+        self.stream.play().context("failed to resume audio stream")
+    }
+
+    /// Flush any pending samples in the output buffer.
+    pub fn flush(&self) {
+        self.buffer.lock().clear();
     }
 }
 

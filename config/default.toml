@@ -100,3 +100,5 @@ restore_on_start = true
 "c" = "toggle_album_art"
 "c-d" = "scroll_half_down"
 "c-u" = "scroll_half_up"
+"?" = "toggle_help"
+"f1" = "toggle_help"

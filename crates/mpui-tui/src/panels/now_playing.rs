@@ -32,7 +32,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         "--"
     };
 
-    let line = Line::from(vec![
+    let line1 = Line::from(vec![
         Span::styled(
             format!(" {status_char} "),
             Style::default().fg(app.theme.playing_fg),
@@ -47,11 +47,33 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         ),
     ]);
 
+    let bar_width = (area.width as usize).saturating_sub(2);
+    let ratio = if state.duration.as_secs_f64() > 0.0 {
+        (state.position.as_secs_f64() / state.duration.as_secs_f64()).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let filled_count = ((ratio * bar_width as f64).round() as usize).min(bar_width);
+    let empty_count = bar_width.saturating_sub(filled_count);
+
+    let line2 = Line::from(vec![
+        Span::raw(" "),
+        Span::styled(
+            "━".repeat(filled_count),
+            Style::default().fg(app.theme.progress_filled),
+        ),
+        Span::styled(
+            "─".repeat(empty_count),
+            Style::default().fg(app.theme.progress_empty),
+        ),
+        Span::raw(" "),
+    ]);
+
     let block = Block::default()
         .borders(Borders::TOP)
         .border_style(Style::default().fg(app.theme.border));
 
-    let paragraph = Paragraph::new(line).block(block);
+    let paragraph = Paragraph::new(vec![line1, line2]).block(block);
     frame.render_widget(paragraph, area);
 }
 
@@ -60,4 +82,28 @@ fn format_duration(d: std::time::Duration) -> String {
     let m = total / 60;
     let s = total % 60;
     format!("{m}:{s:02}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_duration() {
+        assert_eq!(format_duration(std::time::Duration::from_secs(0)), "0:00");
+        assert_eq!(format_duration(std::time::Duration::from_secs(59)), "0:59");
+        assert_eq!(format_duration(std::time::Duration::from_secs(60)), "1:00");
+        assert_eq!(format_duration(std::time::Duration::from_secs(215)), "3:35");
+    }
+
+    #[test]
+    fn test_progress_bar_counts() {
+        let bar_width = 20;
+        let ratio = 0.5;
+        let filled_count = ((ratio * bar_width as f64).round() as usize).min(bar_width);
+        let empty_count = bar_width.saturating_sub(filled_count);
+        assert_eq!(filled_count, 10);
+        assert_eq!(empty_count, 10);
+        assert_eq!(filled_count + empty_count, bar_width);
+    }
 }

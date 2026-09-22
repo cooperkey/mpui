@@ -47,6 +47,7 @@ pub enum KeyAction {
     CenterCurrent,
     ScrollHalfDown,
     ScrollHalfUp,
+    ToggleHelp,
 }
 
 fn resolve_action(key_str: &str, config: &mpui_config::Config) -> Option<KeyAction> {
@@ -85,6 +86,7 @@ fn resolve_action(key_str: &str, config: &mpui_config::Config) -> Option<KeyActi
             "center_current" => Some(KeyAction::CenterCurrent),
             "scroll_half_down" => Some(KeyAction::ScrollHalfDown),
             "scroll_half_up" => Some(KeyAction::ScrollHalfUp),
+            "toggle_help" => Some(KeyAction::ToggleHelp),
             _ => None,
         };
         if action.is_some() {
@@ -108,6 +110,7 @@ fn resolve_action(key_str: &str, config: &mpui_config::Config) -> Option<KeyActi
         "e" => Some(KeyAction::ToggleEqualizer),
         "c" => Some(KeyAction::ToggleAlbumArt),
         "y" => Some(KeyAction::ToggleLyrics),
+        "?" | "f1" => Some(KeyAction::ToggleHelp),
         _ => None,
     }
 }
@@ -149,12 +152,27 @@ fn key_event_to_string(key: &KeyEvent) -> String {
         KeyCode::Home => s.push_str("home"),
         KeyCode::End => s.push_str("end"),
         KeyCode::Backspace => s.push_str("backspace"),
+        KeyCode::F(n) => s.push_str(&format!("f{n}")),
         _ => {}
     }
     s
 }
 
 fn handle_normal_mode(app: &mut App, key: KeyEvent) {
+    if app.show_help {
+        match key.code {
+            KeyCode::Esc
+            | KeyCode::Char('q')
+            | KeyCode::Char('?')
+            | KeyCode::Enter
+            | KeyCode::F(1) => {
+                app.show_help = false;
+                return;
+            }
+            _ => {}
+        }
+    }
+
     let key_str = key_event_to_string(&key);
     if key_str.is_empty() {
         return;
@@ -196,8 +214,9 @@ fn execute_action(app: &mut App, action: KeyAction) {
             if app.focused_panel == FocusedPanel::Equalizer {
                 app.eq_cursor = app.eq_cursor.saturating_sub(1);
             } else {
-                let pos = app.playback.lock().position;
-                let new_pos = pos.saturating_sub(std::time::Duration::from_secs(5));
+                let mut state = app.playback.lock();
+                let new_pos = state.position.saturating_sub(std::time::Duration::from_secs(5));
+                state.position = new_pos;
                 let _ = app.command_tx.send(PlayerCommand::Seek(new_pos));
             }
         }
@@ -205,8 +224,14 @@ fn execute_action(app: &mut App, action: KeyAction) {
             if app.focused_panel == FocusedPanel::Equalizer {
                 app.eq_cursor = (app.eq_cursor + 1).min(9);
             } else {
-                let pos = app.playback.lock().position;
-                let new_pos = pos.saturating_add(std::time::Duration::from_secs(5));
+                let mut state = app.playback.lock();
+                let dur = state.duration;
+                let new_pos = if dur > std::time::Duration::ZERO {
+                    state.position.saturating_add(std::time::Duration::from_secs(5)).min(dur)
+                } else {
+                    state.position.saturating_add(std::time::Duration::from_secs(5))
+                };
+                state.position = new_pos;
                 let _ = app.command_tx.send(PlayerCommand::Seek(new_pos));
             }
         }
@@ -269,6 +294,7 @@ fn execute_action(app: &mut App, action: KeyAction) {
                 move_cursor_up(app);
             }
         }
+        KeyAction::ToggleHelp => app.show_help = !app.show_help,
         _ => {}
     }
 }
@@ -506,6 +532,7 @@ fn execute_command(app: &mut App, cmd: &str) {
             }
         }
         Some("rescan") => app.scan_library(),
+        Some("help" | "keys") => app.show_help = true,
         _ => {} // Unknown command — silently ignore for now.
     }
 }

@@ -7,3 +7,4 @@ pub mod search;
 pub mod album_art;
 pub mod equalizer;
 pub mod lyrics;
+pub mod help;

@@ -12,18 +12,35 @@ pub fn render_image_halfblock(img_bytes: &[u8], width: u16, height: u16) -> Vec<
         return vec![];
     };
 
-    let target_width = width.saturating_sub(2) as u32; // account for borders
-    let target_height = height.saturating_sub(2) as u32 * 2;
+    let max_w = width.saturating_sub(2) as u32; // account for borders
+    let max_h = (height.saturating_sub(2) as u32) * 2; // 2 halfblock pixels per character row
     
-    if target_width == 0 || target_height == 0 {
+    if max_w == 0 || max_h == 0 {
         return vec![];
     }
 
+    // Maintain 1:1 square pixel aspect ratio so album art is never squashed or stretched
+    let side = max_w.min(max_h);
+    let target_width = side;
+    let target_height = side;
+
     let resized = img.resize_exact(target_width, target_height, FilterType::Triangle).into_rgba8();
 
+    let pad_left = ((max_w - target_width) / 2) as usize;
+    let rows = (target_height + 1) / 2;
+    let total_rows = height.saturating_sub(2) as usize;
+    let pad_top = total_rows.saturating_sub(rows as usize) / 2;
+
     let mut lines = Vec::new();
+    for _ in 0..pad_top {
+        lines.push(Line::raw(""));
+    }
+
     for y in (0..target_height).step_by(2) {
         let mut spans = Vec::new();
+        if pad_left > 0 {
+            spans.push(Span::raw(" ".repeat(pad_left)));
+        }
         for x in 0..target_width {
             let top = resized.get_pixel(x, y);
             let bottom = if y + 1 < target_height {
