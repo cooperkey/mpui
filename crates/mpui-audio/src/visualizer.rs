@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use rustfft::{num_complex::Complex, FftPlanner};
+use rustfft::{num_complex::Complex, Fft, FftPlanner};
 
 /// FFT-based spectrum analyzer for the visualizer.
 ///
@@ -10,22 +10,41 @@ use rustfft::{num_complex::Complex, FftPlanner};
 /// and exposes the result for the TUI to render.
 pub struct SpectrumAnalyzer {
     fft_size: usize,
-    planner: FftPlanner<f32>,
+    fft: Arc<dyn Fft<f32>>,
     window: Vec<f32>,
     history: VecDeque<f32>,
+    buffer: Vec<Complex<f32>>,
+    scratch: Vec<Complex<f32>>,
+    samples_since_last_fft: usize,
+    fft_hop_size: usize,
     /// Latest magnitude spectrum, shared with the UI thread.
     pub spectrum: Arc<Mutex<Vec<f32>>>,
 }
 
 impl SpectrumAnalyzer {
     pub fn new(fft_size: usize) -> Self {
-        let window = hann_window(fft_size);
         let spectrum = Arc::new(Mutex::new(vec![0.0; fft_size / 2]));
+        Self::with_spectrum(fft_size, spectrum)
+    }
+
+    pub fn with_spectrum(fft_size: usize, spectrum: Arc<Mutex<Vec<f32>>>) -> Self {
+        let window = hann_window(fft_size);
+        let mut planner = FftPlanner::new();
+        let fft = planner.plan_fft_forward(fft_size);
+        let scratch_len = fft.get_inplace_scratch_len();
+        let buffer = vec![Complex::new(0.0, 0.0); fft_size];
+        let scratch = vec![Complex::new(0.0, 0.0); scratch_len];
+        let fft_hop_size = 1024;
+
         Self {
             fft_size,
-            planner: FftPlanner::new(),
+            fft,
             window,
             history: VecDeque::with_capacity(fft_size),
+            buffer,
+            scratch,
+            samples_since_last_fft: 1024,
+            fft_hop_size,
             spectrum,
         }
     }
@@ -38,29 +57,28 @@ impl SpectrumAnalyzer {
             }
             self.history.push_back(s);
         }
+        self.samples_since_last_fft += samples.len();
 
-        if self.history.len() < self.fft_size {
+        if self.history.len() < self.fft_size || self.samples_since_last_fft < self.fft_hop_size {
             return;
         }
+        self.samples_since_last_fft = 0;
 
-        let fft = self.planner.plan_fft_forward(self.fft_size);
+        for (i, &s) in self.history.iter().enumerate() {
+            self.buffer[i] = Complex::new(s * self.window[i], 0.0);
+        }
 
-        let mut buffer: Vec<Complex<f32>> = self
-            .history
-            .iter()
-            .enumerate()
-            .map(|(i, &s)| Complex::new(s * self.window[i], 0.0))
-            .collect();
-
-        fft.process(&mut buffer);
+        self.fft.process_with_scratch(&mut self.buffer, &mut self.scratch);
 
         let half = self.fft_size / 2;
         // Parseval unitary normalization (1 / sqrt(N))
         let norm = 1.0 / (self.fft_size as f32).sqrt();
         let mut spec = self.spectrum.lock();
-        spec.resize(half, 0.0);
+        if spec.len() != half {
+            spec.resize(half, 0.0);
+        }
         for i in 0..half {
-            spec[i] = buffer[i].norm() * norm;
+            spec[i] = self.buffer[i].norm() * norm;
         }
     }
 

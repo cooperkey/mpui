@@ -60,7 +60,7 @@ pub fn render_image_halfblock(img_bytes: &[u8], width: u16, height: u16) -> Vec<
     lines
 }
 
-pub fn render(frame: &mut Frame, area: Rect, app: &App) {
+pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
     let active = app.focused_panel == FocusedPanel::AlbumArt;
     let border_color = if active {
         app.theme.border_focused
@@ -82,17 +82,25 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     let inner = block.inner(area);
 
-    if let Some((_, ref img_bytes)) = app.current_art {
-        // Compute width to maintain square aspect ratio roughly if we want?
-        // Since characters are approx 1:2 aspect ratio, half block makes them 1:1 "pixels".
-        // Let's just fit it to the area.
-        let lines = render_image_halfblock(img_bytes, area.width, area.height);
-        
-        let widget = Paragraph::new(lines)
-            .block(block)
-            .alignment(Alignment::Center);
-        frame.render_widget(widget, area);
+    if let Some((track_id, ref img_bytes)) = app.current_art {
+        let is_cached = match &app.cached_art {
+            Some((id, w, h, _)) => *id == track_id && *w == area.width && *h == area.height,
+            None => false,
+        };
+
+        if !is_cached {
+            let rendered = render_image_halfblock(img_bytes, area.width, area.height);
+            app.cached_art = Some((track_id, area.width, area.height, rendered));
+        }
+
+        if let Some((_, _, _, ref lines)) = app.cached_art {
+            let widget = Paragraph::new(lines.clone())
+                .block(block)
+                .alignment(Alignment::Center);
+            frame.render_widget(widget, area);
+        }
     } else {
+        app.cached_art = None;
         let placeholder = "no art";
         let height = inner.height;
         let pad = height.saturating_sub(1) / 2;

@@ -78,7 +78,7 @@ impl Player {
     pub fn run(self) {
         let mut decoder: Option<StreamingDecoder> = None;
         let mut current_samples_decoded: u64 = 0;
-        let mut analyzer = SpectrumAnalyzer::new(2048);
+        let mut analyzer = SpectrumAnalyzer::with_spectrum(2048, self.spectrum.clone());
         let mut equalizer = Equalizer::new(44100, 2);
         let mut audio_output = crate::output::AudioOutput::new(None, None, self.sample_rx.clone()).ok();
         let mut active_out_rate = audio_output.as_ref().map(|o| o.sample_rate).unwrap_or(44100);
@@ -242,11 +242,6 @@ impl Player {
                             mono.push(sum / channels as f32);
                         }
                         analyzer.analyze(&mono);
-                        {
-                            let mut shared_spec = self.spectrum.lock();
-                            let local_spec = analyzer.spectrum.lock();
-                            shared_spec.clone_from(&local_spec);
-                        }
 
                         // Apply master volume attenuation for output
                         let volume = self.state.lock().volume;
@@ -259,11 +254,15 @@ impl Player {
                         current_samples_decoded += (frame.len() / channels) as u64;
                         self.state.lock().position = Duration::from_secs_f64(current_samples_decoded as f64 / sample_rate as f64);
                         
-                        // Channel conversion & sample rate matching
-                        let ch_adapted = convert_channels(&frame, channels, active_out_channels);
-                        let resampled = resample_linear(&ch_adapted, sample_rate, active_out_rate, active_out_channels);
+                        // Channel conversion & sample rate matching (zero-allocation fast path)
+                        let to_send = if channels == active_out_channels && sample_rate == active_out_rate {
+                            frame
+                        } else {
+                            let ch_adapted = convert_channels(&frame, channels, active_out_channels);
+                            resample_linear(&ch_adapted, sample_rate, active_out_rate, active_out_channels)
+                        };
 
-                        if self.sample_tx.send(resampled).is_err() {
+                        if self.sample_tx.send(to_send).is_err() {
                             break;
                         }
                     } else {
