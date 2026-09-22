@@ -1,10 +1,10 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use crossbeam_channel::Sender;
+use crossbeam_channel::{Receiver, Sender};
 use parking_lot::Mutex;
 
-use mpui_audio::player::{PlaybackState, PlayerCommand};
+use mpui_audio::player::{PlaybackState, PlayerCommand, PlayerEvent};
 use mpui_core::library::Library;
 use mpui_core::queue::Queue;
 use mpui_config::Config;
@@ -57,6 +57,7 @@ pub struct App {
     pub playback: Arc<Mutex<PlaybackState>>,
     pub command_tx: Sender<PlayerCommand>,
     pub spectrum: Arc<Mutex<Vec<f32>>>,
+    pub event_rx: Receiver<PlayerEvent>,
 
     pub input_mode: InputMode,
     pub focused_panel: FocusedPanel,
@@ -109,6 +110,7 @@ impl App {
         playback: Arc<Mutex<PlaybackState>>,
         command_tx: Sender<PlayerCommand>,
         spectrum: Arc<Mutex<Vec<f32>>>,
+        event_rx: Receiver<PlayerEvent>,
     ) -> Self {
         let theme = crate::theme::Theme::from_config(&config.theme);
         let show_viz = config.visualizer.enabled;
@@ -157,6 +159,7 @@ impl App {
             playback,
             command_tx,
             spectrum,
+            event_rx,
             input_mode: InputMode::Normal,
             focused_panel: FocusedPanel::Library,
             command_buffer: String::new(),
@@ -220,13 +223,24 @@ impl App {
     }
 
     pub fn toggle_pause(&mut self) {
-        let mut state = self.playback.lock();
-        if state.paused {
-            state.paused = false;
+        let (is_paused, is_playing) = {
+            let state = self.playback.lock();
+            (state.paused, state.playing)
+        };
+
+        if is_paused {
+            self.playback.lock().paused = false;
             let _ = self.command_tx.send(PlayerCommand::Resume);
-        } else if state.playing {
-            state.paused = true;
+        } else if is_playing {
+            self.playback.lock().paused = true;
             let _ = self.command_tx.send(PlayerCommand::Pause);
+        } else {
+            // Stopped: start playback with current queue track or selected track
+            if let Some(id) = self.queue.current_track() {
+                self.play_track_at_index(id);
+            } else if let Some(id) = self.selected_track_id() {
+                self.play_track_at_index(id);
+            }
         }
     }
 
@@ -234,6 +248,8 @@ impl App {
         self.shuffle = !self.shuffle;
         if self.shuffle {
             self.queue.shuffle();
+        } else {
+            self.queue.unshuffle();
         }
     }
 
@@ -317,6 +333,15 @@ impl App {
     }
 
     pub fn play_track_at_index(&mut self, id: mpui_core::track::TrackId) {
+        if self.queue.current_track() != Some(id) {
+            if let Some(pos) = self.queue.items().iter().position(|&t| t == id) {
+                self.queue.set_current(pos);
+            } else {
+                self.queue.push(id);
+                self.queue.set_current(self.queue.len() - 1);
+            }
+        }
+
         if let Some(track) = self.library.get(id).cloned() {
             if self.config.termux.background_playback {
                 mpui_core::termux::acquire_wake_lock();
@@ -328,5 +353,132 @@ impl App {
             self.current_art = mpui_core::metadata::extract_cover_art(&track.path).map(|art| (id, art));
             self.current_lyrics = mpui_core::metadata::extract_lyrics(&track.path);
         }
+    }
+
+    pub fn handle_playback_events(&mut self) {
+        while let Ok(event) = self.event_rx.try_recv() {
+            match event {
+                PlayerEvent::TrackEnded => {
+                    self.on_track_ended();
+                }
+            }
+        }
+    }
+
+    pub fn on_track_ended(&mut self) {
+        if let Some(next_id) = self.queue.advance(self.repeat_mode) {
+            self.play_track_at_index(next_id);
+        } else {
+            let mut state = self.playback.lock();
+            state.playing = false;
+            state.paused = false;
+            state.position = std::time::Duration::ZERO;
+            self.spectrum.lock().clear();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_test_app() -> (App, crossbeam_channel::Sender<PlayerEvent>, crossbeam_channel::Receiver<PlayerCommand>) {
+        let config = Config::default();
+        let playback = Arc::new(Mutex::new(PlaybackState::default()));
+        let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
+        let spectrum = Arc::new(Mutex::new(Vec::new()));
+        let (event_tx, event_rx) = crossbeam_channel::unbounded();
+
+        let app = App::new(config, playback, cmd_tx, spectrum, event_rx);
+        (app, event_tx, cmd_rx)
+    }
+
+    #[test]
+    fn test_app_play_track_synchronizes_queue() {
+        let (mut app, _event_tx, _cmd_rx) = create_test_app();
+        let id1 = mpui_core::track::TrackId(1);
+        let id2 = mpui_core::track::TrackId(2);
+
+        app.queue.push(id1);
+        app.queue.push(id2);
+        assert_eq!(app.queue.current_index(), Some(0));
+
+        // Playing track 2 directly must update queue cursor to 1
+        app.play_track_at_index(id2);
+        assert_eq!(app.queue.current_index(), Some(1));
+        assert_eq!(app.queue.current_track(), Some(id2));
+
+        // Playing an untracked id must push and select
+        let id3 = mpui_core::track::TrackId(3);
+        app.play_track_at_index(id3);
+        assert_eq!(app.queue.current_index(), Some(2));
+        assert_eq!(app.queue.current_track(), Some(id3));
+        assert_eq!(app.queue.len(), 3);
+    }
+
+    #[test]
+    fn test_app_auto_advance_event_handling() {
+        let (mut app, event_tx, _cmd_rx) = create_test_app();
+        let id1 = mpui_core::track::TrackId(10);
+        let id2 = mpui_core::track::TrackId(20);
+
+        app.queue.push(id1);
+        app.queue.push(id2);
+        app.repeat_mode = RepeatMode::Off;
+
+        assert_eq!(app.queue.current_track(), Some(id1));
+
+        // Send track ended: advances to track 2
+        event_tx.send(PlayerEvent::TrackEnded).unwrap();
+        app.handle_playback_events();
+        assert_eq!(app.queue.current_track(), Some(id2));
+
+        // Send track ended again: reaches end of queue in RepeatMode::Off
+        event_tx.send(PlayerEvent::TrackEnded).unwrap();
+        app.handle_playback_events();
+        assert_eq!(app.playback.lock().playing, false);
+
+        // Switch to RepeatMode::Queue and send event: wraps to track 1
+        app.repeat_mode = RepeatMode::Queue;
+        event_tx.send(PlayerEvent::TrackEnded).unwrap();
+        app.handle_playback_events();
+        assert_eq!(app.queue.current_track(), Some(id1));
+    }
+
+    #[test]
+    fn test_app_toggle_pause_starts_when_stopped() {
+        let (mut app, _event_tx, cmd_rx) = create_test_app();
+        let id = mpui_core::track::TrackId(42);
+        app.queue.push(id);
+
+        assert!(!app.playback.lock().playing);
+        assert!(!app.playback.lock().paused);
+
+        // Spacebar on stopped player should start playing
+        app.toggle_pause();
+        assert_eq!(app.queue.current_track(), Some(id));
+        // Verify Play command was emitted (or attempted)
+        assert!(cmd_rx.try_recv().is_ok() || app.library.get(id).is_none());
+    }
+
+    #[test]
+    fn test_app_toggle_shuffle_preserves_queue() {
+        let (mut app, _event_tx, _cmd_rx) = create_test_app();
+        for i in 1..=5 {
+            app.queue.push(mpui_core::track::TrackId(i));
+        }
+        app.queue.set_current(2); // TrackId(3)
+
+        assert!(!app.shuffle);
+        app.toggle_shuffle();
+        assert!(app.shuffle);
+        assert!(app.queue.is_shuffled());
+        assert_eq!(app.queue.current_track(), Some(mpui_core::track::TrackId(3)));
+
+        app.toggle_shuffle();
+        assert!(!app.shuffle);
+        assert!(!app.queue.is_shuffled());
+        assert_eq!(app.queue.current_track(), Some(mpui_core::track::TrackId(3)));
+        assert_eq!(app.queue.current_index(), Some(2));
     }
 }

@@ -112,6 +112,12 @@ fn resolve_action(key_str: &str, config: &mpui_config::Config) -> Option<KeyActi
         "end" => Some(KeyAction::JumpBottom),
         "enter" => Some(KeyAction::Confirm),
         "space" => Some(KeyAction::TogglePause),
+        "media_play" | "media_pause" | "media_play_pause" => Some(KeyAction::TogglePause),
+        "media_next" => Some(KeyAction::NextTrack),
+        "media_prev" => Some(KeyAction::PrevTrack),
+        "media_vol_up" => Some(KeyAction::VolumeUp),
+        "media_vol_down" => Some(KeyAction::VolumeDown),
+        "media_mute" => Some(KeyAction::MuteToggle),
         "v" => Some(KeyAction::ToggleVisualizer),
         "e" => Some(KeyAction::ToggleEqualizer),
         "c" => Some(KeyAction::ToggleAlbumArt),
@@ -160,6 +166,18 @@ fn key_event_to_string(key: &KeyEvent) -> String {
         KeyCode::End => s.push_str("end"),
         KeyCode::Backspace => s.push_str("backspace"),
         KeyCode::F(n) => s.push_str(&format!("f{n}")),
+        KeyCode::Media(m) => match m {
+            crossterm::event::MediaKeyCode::Play => s.push_str("media_play"),
+            crossterm::event::MediaKeyCode::Pause => s.push_str("media_pause"),
+            crossterm::event::MediaKeyCode::PlayPause => s.push_str("media_play_pause"),
+            crossterm::event::MediaKeyCode::Stop => s.push_str("media_stop"),
+            crossterm::event::MediaKeyCode::TrackNext => s.push_str("media_next"),
+            crossterm::event::MediaKeyCode::TrackPrevious => s.push_str("media_prev"),
+            crossterm::event::MediaKeyCode::LowerVolume => s.push_str("media_vol_down"),
+            crossterm::event::MediaKeyCode::RaiseVolume => s.push_str("media_vol_up"),
+            crossterm::event::MediaKeyCode::MuteVolume => s.push_str("media_mute"),
+            _ => {}
+        },
         _ => {}
     }
     s
@@ -223,9 +241,11 @@ fn execute_action(app: &mut App, action: KeyAction) {
                 app.eq_cursor = app.eq_cursor.saturating_sub(1);
             } else {
                 let mut state = app.playback.lock();
-                let new_pos = state.position.saturating_sub(std::time::Duration::from_secs(5));
-                state.position = new_pos;
-                let _ = app.command_tx.send(PlayerCommand::Seek(new_pos));
+                if state.playing {
+                    let new_pos = state.position.saturating_sub(std::time::Duration::from_secs(5));
+                    state.position = new_pos;
+                    let _ = app.command_tx.send(PlayerCommand::Seek(new_pos));
+                }
             }
         }
         KeyAction::ExpandOrSeekForward => {
@@ -233,28 +253,34 @@ fn execute_action(app: &mut App, action: KeyAction) {
                 app.eq_cursor = (app.eq_cursor + 1).min(9);
             } else {
                 let mut state = app.playback.lock();
-                let dur = state.duration;
-                let new_pos = if dur > std::time::Duration::ZERO {
-                    state.position.saturating_add(std::time::Duration::from_secs(5)).min(dur)
-                } else {
-                    state.position.saturating_add(std::time::Duration::from_secs(5))
-                };
-                state.position = new_pos;
-                let _ = app.command_tx.send(PlayerCommand::Seek(new_pos));
+                if state.playing {
+                    let dur = state.duration;
+                    let new_pos = if dur > std::time::Duration::ZERO {
+                        state.position.saturating_add(std::time::Duration::from_secs(5)).min(dur)
+                    } else {
+                        state.position.saturating_add(std::time::Duration::from_secs(5))
+                    };
+                    state.position = new_pos;
+                    let _ = app.command_tx.send(PlayerCommand::Seek(new_pos));
+                }
             }
         }
         KeyAction::SeekStart => {
             let mut state = app.playback.lock();
-            state.position = std::time::Duration::ZERO;
-            let _ = app.command_tx.send(PlayerCommand::Seek(std::time::Duration::ZERO));
+            if state.playing {
+                state.position = std::time::Duration::ZERO;
+                let _ = app.command_tx.send(PlayerCommand::Seek(std::time::Duration::ZERO));
+            }
         }
         KeyAction::SeekEnd => {
             let mut state = app.playback.lock();
-            let dur = state.duration;
-            if dur > std::time::Duration::ZERO {
-                let end_pos = dur.saturating_sub(std::time::Duration::from_millis(500));
-                state.position = end_pos;
-                let _ = app.command_tx.send(PlayerCommand::Seek(end_pos));
+            if state.playing {
+                let dur = state.duration;
+                if dur > std::time::Duration::ZERO {
+                    let end_pos = dur.saturating_sub(std::time::Duration::from_millis(500));
+                    state.position = end_pos;
+                    let _ = app.command_tx.send(PlayerCommand::Seek(end_pos));
+                }
             }
         }
         KeyAction::Confirm => handle_confirm(app),
@@ -280,20 +306,50 @@ fn execute_action(app: &mut App, action: KeyAction) {
         }
         KeyAction::QueueRemove => {
             if app.focused_panel == FocusedPanel::Queue {
-                let ids = app.queue.items();
-                if app.queue_cursor < ids.len() {
+                if app.queue_cursor < app.queue.len() {
                     app.queue.remove(app.queue_cursor);
-                    app.queue_cursor = app.queue_cursor.saturating_sub(1);
+                    if app.queue.is_empty() {
+                        app.queue_cursor = 0;
+                    } else if app.queue_cursor >= app.queue.len() {
+                        app.queue_cursor = app.queue.len() - 1;
+                    }
                 }
             }
         }
         KeyAction::NextTrack => {
-            if let Some(id) = app.queue.next() {
+            let next_id = match app.repeat_mode {
+                mpui_config::types::RepeatMode::Queue => {
+                    if let Some(id) = app.queue.next() {
+                        Some(id)
+                    } else if !app.queue.is_empty() {
+                        app.queue.set_current(0);
+                        app.queue.current_track()
+                    } else {
+                        None
+                    }
+                }
+                _ => app.queue.next(),
+            };
+            if let Some(id) = next_id {
                 app.play_track_at_index(id);
             }
         }
         KeyAction::PrevTrack => {
-            if let Some(id) = app.queue.prev() {
+            let prev_id = match app.repeat_mode {
+                mpui_config::types::RepeatMode::Queue => {
+                    if let Some(id) = app.queue.prev() {
+                        Some(id)
+                    } else if !app.queue.is_empty() {
+                        let last = app.queue.len() - 1;
+                        app.queue.set_current(last);
+                        app.queue.current_track()
+                    } else {
+                        None
+                    }
+                }
+                _ => app.queue.prev(),
+            };
+            if let Some(id) = prev_id {
                 app.play_track_at_index(id);
             }
         }
@@ -307,6 +363,21 @@ fn execute_action(app: &mut App, action: KeyAction) {
         KeyAction::MuteToggle => app.toggle_mute(),
         KeyAction::ShuffleToggle => app.toggle_shuffle(),
         KeyAction::RepeatCycle => app.cycle_repeat(),
+        KeyAction::CenterCurrent => match app.focused_panel {
+            FocusedPanel::Queue => {
+                if let Some(idx) = app.queue.current_index() {
+                    app.queue_cursor = idx;
+                }
+            }
+            FocusedPanel::Library => {
+                if let Some(cur_id) = app.queue.current_track() {
+                    if let Some(idx) = app.library.track_ids().iter().position(|&id| id == cur_id) {
+                        app.library_cursor = idx;
+                    }
+                }
+            }
+            _ => {}
+        },
         KeyAction::ScrollHalfDown => {
             for _ in 0..10 {
                 move_cursor_down(app);
@@ -600,7 +671,6 @@ fn handle_confirm(app: &mut App) {
         FocusedPanel::Library => {
             let ids = app.library.track_ids();
             if let Some(&id) = ids.get(app.library_cursor) {
-                app.queue.push(id);
                 app.play_track_at_index(id);
             }
         }

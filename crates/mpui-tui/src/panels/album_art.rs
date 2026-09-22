@@ -172,8 +172,9 @@ mod tests {
         let config = mpui_config::Config::default();
         let playback = Arc::new(Mutex::new(PlaybackState::default()));
         let (tx, _) = crossbeam_channel::unbounded();
+        let (_, event_rx) = crossbeam_channel::unbounded();
         let spectrum = Arc::new(Mutex::new(Vec::new()));
-        let mut app = App::new(config, playback, tx, spectrum);
+        let mut app = App::new(config, playback, tx, spectrum, event_rx);
 
         terminal
             .draw(|f| {
@@ -199,8 +200,9 @@ mod tests {
         let config = mpui_config::Config::default();
         let playback = Arc::new(Mutex::new(PlaybackState::default()));
         let (tx, _) = crossbeam_channel::unbounded();
+        let (_, event_rx) = crossbeam_channel::unbounded();
         let spectrum = Arc::new(Mutex::new(Vec::new()));
-        let mut app = App::new(config, playback, tx, spectrum);
+        let mut app = App::new(config, playback, tx, spectrum, event_rx);
 
         let track = mpui_core::track::Track {
             id: mpui_core::track::TrackId(101),

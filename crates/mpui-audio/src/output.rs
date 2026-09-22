@@ -5,19 +5,21 @@ use crossbeam_channel::Receiver;
 use parking_lot::Mutex;
 use std::sync::Arc;
 
+use std::collections::VecDeque;
+
 /// Audio output stream wrapping cpal.
 pub struct AudioOutput {
     stream: Stream,
     pub sample_rate: u32,
     pub channels: u16,
-    pub buffer: Arc<Mutex<Vec<f32>>>,
+    pub buffer: Arc<Mutex<VecDeque<f32>>>,
 }
 
 impl AudioOutput {
     /// Create a new audio output stream that reads samples from `rx`.
     ///
     /// `rx` receives chunks of interleaved f32 samples from the player thread.
-    /// The cpal callback pulls from a shared buffer fed by those chunks.
+    /// The cpal callback pulls from a shared ringbuffer fed by those chunks.
     pub fn new(
         sample_rate: Option<u32>,
         channels: Option<u16>,
@@ -50,33 +52,22 @@ impl AudioOutput {
             buffer_size: cpal::BufferSize::Default,
         };
 
-        let buffer: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
-        let buf_clone = buffer.clone();
-
-        // Drain channel into buffer in a helper closure.
-        let fill_buffer = move |needed: usize| {
-            let mut buf = buf_clone.lock();
-            while buf.len() < needed {
-                match sample_rx.try_recv() {
-                    Ok(chunk) => buf.extend_from_slice(&chunk),
-                    Err(_) => break,
-                }
-            }
-        };
-
+        let buffer: Arc<Mutex<VecDeque<f32>>> = Arc::new(Mutex::new(VecDeque::with_capacity(8192)));
         let buf_out = buffer.clone();
+
         let stream = device.build_output_stream(
             &config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                fill_buffer(data.len());
                 let mut buf = buf_out.lock();
-                let available = buf.len().min(data.len());
-                data[..available].copy_from_slice(&buf[..available]);
-                // Silence any remainder.
-                for s in &mut data[available..] {
-                    *s = 0.0;
+                while buf.len() < data.len() {
+                    match sample_rx.try_recv() {
+                        Ok(chunk) => buf.extend(chunk),
+                        Err(_) => break,
+                    }
                 }
-                buf.drain(..available);
+                for sample in data.iter_mut() {
+                    *sample = buf.pop_front().unwrap_or(0.0);
+                }
             },
             |err| {
                 tracing::error!("audio output error: {err}");
