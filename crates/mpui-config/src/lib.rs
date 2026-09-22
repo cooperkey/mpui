@@ -327,6 +327,15 @@ fn default_keybindings() -> HashMap<String, String> {
         (":", "command_mode"),
         ("tab", "focus_next"),
         ("s-tab", "focus_prev"),
+        ("]", "focus_next"),
+        ("[", "focus_prev"),
+        ("1", "focus_library"),
+        ("2", "focus_queue"),
+        ("3", "focus_visualizer"),
+        ("4", "focus_equalizer"),
+        ("5", "focus_album_art"),
+        ("6", "focus_metadata"),
+        ("7", "focus_lyrics"),
         (">", "next_track"),
         ("<", "prev_track"),
         ("media_play_pause", "toggle_pause"),
@@ -409,6 +418,10 @@ pub fn load(path: Option<&Path>) -> Result<Config> {
 
     let contents = std::fs::read_to_string(&config_path)?;
     let mut config: Config = toml::from_str(&contents)?;
+
+    let mut keybindings = default_keybindings();
+    keybindings.extend(config.keybindings);
+    config.keybindings = keybindings;
     
     for dir in &mut config.library.directories {
         *dir = expand_tilde(dir);

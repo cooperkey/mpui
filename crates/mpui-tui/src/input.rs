@@ -29,6 +29,13 @@ pub enum KeyAction {
     CommandMode,
     FocusNext,
     FocusPrev,
+    FocusLibrary,
+    FocusQueue,
+    FocusVisualizer,
+    FocusEqualizer,
+    FocusAlbumArt,
+    FocusMetadata,
+    FocusLyrics,
     NextTrack,
     PrevTrack,
     VolumeUp,
@@ -72,6 +79,13 @@ fn resolve_action(key_str: &str, config: &mpui_config::Config) -> Option<KeyActi
             "command_mode" => Some(KeyAction::CommandMode),
             "focus_next" => Some(KeyAction::FocusNext),
             "focus_prev" => Some(KeyAction::FocusPrev),
+            "focus_library" => Some(KeyAction::FocusLibrary),
+            "focus_queue" => Some(KeyAction::FocusQueue),
+            "focus_visualizer" => Some(KeyAction::FocusVisualizer),
+            "focus_equalizer" => Some(KeyAction::FocusEqualizer),
+            "focus_album_art" => Some(KeyAction::FocusAlbumArt),
+            "focus_metadata" | "focus_info" | "focus_track_info" => Some(KeyAction::FocusMetadata),
+            "focus_lyrics" => Some(KeyAction::FocusLyrics),
             "next_track" => Some(KeyAction::NextTrack),
             "prev_track" => Some(KeyAction::PrevTrack),
             "volume_up" => Some(KeyAction::VolumeUp),
@@ -123,6 +137,15 @@ fn resolve_action(key_str: &str, config: &mpui_config::Config) -> Option<KeyActi
         "c" => Some(KeyAction::ToggleAlbumArt),
         "i" => Some(KeyAction::TrackInfo),
         "y" => Some(KeyAction::ToggleLyrics),
+        "[" => Some(KeyAction::FocusPrev),
+        "]" => Some(KeyAction::FocusNext),
+        "1" => Some(KeyAction::FocusLibrary),
+        "2" => Some(KeyAction::FocusQueue),
+        "3" => Some(KeyAction::FocusVisualizer),
+        "4" => Some(KeyAction::FocusEqualizer),
+        "5" => Some(KeyAction::FocusAlbumArt),
+        "6" => Some(KeyAction::FocusMetadata),
+        "7" => Some(KeyAction::FocusLyrics),
         "?" | "f1" => Some(KeyAction::ToggleHelp),
         _ => None,
     }
@@ -298,6 +321,13 @@ fn execute_action(app: &mut App, action: KeyAction) {
         KeyAction::Quit => app.should_quit = true,
         KeyAction::FocusNext => cycle_focus(app, true),
         KeyAction::FocusPrev => cycle_focus(app, false),
+        KeyAction::FocusLibrary => focus_panel(app, FocusedPanel::Library),
+        KeyAction::FocusQueue => focus_panel(app, FocusedPanel::Queue),
+        KeyAction::FocusVisualizer => focus_panel(app, FocusedPanel::Visualizer),
+        KeyAction::FocusEqualizer => focus_panel(app, FocusedPanel::Equalizer),
+        KeyAction::FocusAlbumArt => focus_panel(app, FocusedPanel::AlbumArt),
+        KeyAction::FocusMetadata => focus_panel(app, FocusedPanel::Metadata),
+        KeyAction::FocusLyrics => focus_panel(app, FocusedPanel::Lyrics),
         KeyAction::QueueAdd => {
             let ids = app.library.track_ids();
             if let Some(&id) = ids.get(app.library_cursor) {
@@ -787,3 +817,103 @@ fn cycle_focus(app: &mut App, forward: bool) {
     };
     app.focused_panel = panels[next];
 }
+
+fn focus_panel(app: &mut App, panel: FocusedPanel) {
+    match panel {
+        FocusedPanel::Library => {
+            app.focused_panel = FocusedPanel::Library;
+        }
+        FocusedPanel::Queue => {
+            app.show_queue = true;
+            app.focused_panel = FocusedPanel::Queue;
+        }
+        FocusedPanel::Visualizer => {
+            app.show_visualizer = true;
+            app.focused_panel = FocusedPanel::Visualizer;
+        }
+        FocusedPanel::Equalizer => {
+            app.show_equalizer = true;
+            app.focused_panel = FocusedPanel::Equalizer;
+        }
+        FocusedPanel::AlbumArt => {
+            app.show_album_art = true;
+            app.focused_panel = FocusedPanel::AlbumArt;
+        }
+        FocusedPanel::Metadata => {
+            app.show_metadata = true;
+            app.focused_panel = FocusedPanel::Metadata;
+        }
+        FocusedPanel::Lyrics => {
+            app.show_lyrics = true;
+            app.focused_panel = FocusedPanel::Lyrics;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+    use mpui_audio::player::PlaybackState;
+    use mpui_config::Config;
+    use parking_lot::Mutex;
+    use std::sync::Arc;
+
+    fn create_test_app() -> App {
+        let config = Config::default();
+        let playback = Arc::new(Mutex::new(PlaybackState::default()));
+        let (cmd_tx, _cmd_rx) = crossbeam_channel::unbounded();
+        let spectrum = Arc::new(Mutex::new(Vec::new()));
+        let (_event_tx, event_rx) = crossbeam_channel::unbounded();
+        App::new(config, playback, cmd_tx, spectrum, event_rx)
+    }
+
+    fn key_press(code: KeyCode) -> KeyEvent {
+        KeyEvent {
+            code,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        }
+    }
+
+    #[test]
+    fn test_number_shortcuts_switch_panes() {
+        let mut app = create_test_app();
+        assert_eq!(app.focused_panel, FocusedPanel::Library);
+
+        handle_key(&mut app, key_press(KeyCode::Char('2')));
+        assert_eq!(app.focused_panel, FocusedPanel::Queue);
+
+        handle_key(&mut app, key_press(KeyCode::Char('3')));
+        assert_eq!(app.focused_panel, FocusedPanel::Visualizer);
+
+        handle_key(&mut app, key_press(KeyCode::Char('4')));
+        assert_eq!(app.focused_panel, FocusedPanel::Equalizer);
+
+        handle_key(&mut app, key_press(KeyCode::Char('5')));
+        assert_eq!(app.focused_panel, FocusedPanel::AlbumArt);
+
+        handle_key(&mut app, key_press(KeyCode::Char('6')));
+        assert_eq!(app.focused_panel, FocusedPanel::Metadata);
+
+        handle_key(&mut app, key_press(KeyCode::Char('7')));
+        assert_eq!(app.focused_panel, FocusedPanel::Lyrics);
+
+        handle_key(&mut app, key_press(KeyCode::Char('1')));
+        assert_eq!(app.focused_panel, FocusedPanel::Library);
+    }
+
+    #[test]
+    fn test_bracket_shortcuts_cycle_panes() {
+        let mut app = create_test_app();
+        assert_eq!(app.focused_panel, FocusedPanel::Library);
+
+        handle_key(&mut app, key_press(KeyCode::Char(']')));
+        assert_eq!(app.focused_panel, FocusedPanel::Queue);
+
+        handle_key(&mut app, key_press(KeyCode::Char('[')));
+        assert_eq!(app.focused_panel, FocusedPanel::Library);
+    }
+}
+

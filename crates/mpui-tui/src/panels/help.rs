@@ -54,7 +54,8 @@ pub fn render(frame: &mut Frame, _area: Rect, app: &App) {
                 ("c-d / PgDown", "Scroll down 10 items"),
                 ("c-u / PgUp", "Scroll up 10 items"),
                 ("Enter", "Play selected track / Confirm action"),
-                ("Tab / S-Tab", "Cycle focus between panels"),
+                ("Tab / [ / ]", "Cycle focus between panels (or prev/next)"),
+                ("1 - 7", "Jump directly to pane (1:Lib 2:Q 3:Viz 4:EQ 5:Art 6:Info 7:Lrc)"),
             ],
         ),
         (
