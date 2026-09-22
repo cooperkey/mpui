@@ -115,6 +115,7 @@ fn resolve_action(key_str: &str, config: &mpui_config::Config) -> Option<KeyActi
         "v" => Some(KeyAction::ToggleVisualizer),
         "e" => Some(KeyAction::ToggleEqualizer),
         "c" => Some(KeyAction::ToggleAlbumArt),
+        "i" => Some(KeyAction::TrackInfo),
         "y" => Some(KeyAction::ToggleLyrics),
         "?" | "f1" => Some(KeyAction::ToggleHelp),
         _ => None,
@@ -214,6 +215,7 @@ fn execute_action(app: &mut App, action: KeyAction) {
         KeyAction::JumpTop => {
             app.library_cursor = 0;
             app.queue_cursor = 0;
+            app.metadata_scroll = 0;
         }
         KeyAction::JumpBottom => move_cursor_bottom(app),
         KeyAction::CollapseOrSeekBack => {
@@ -298,6 +300,7 @@ fn execute_action(app: &mut App, action: KeyAction) {
         KeyAction::ToggleVisualizer => app.show_visualizer = !app.show_visualizer,
         KeyAction::ToggleEqualizer => app.show_equalizer = !app.show_equalizer,
         KeyAction::ToggleAlbumArt => app.show_album_art = !app.show_album_art,
+        KeyAction::TrackInfo => app.show_metadata = !app.show_metadata,
         KeyAction::ToggleLyrics => app.show_lyrics = !app.show_lyrics,
         KeyAction::VolumeUp => app.volume_up(),
         KeyAction::VolumeDown => app.volume_down(),
@@ -475,6 +478,7 @@ fn execute_command(app: &mut App, cmd: &str) {
                     "viz" | "visualizer" => app.show_visualizer = !app.show_visualizer,
                     "eq" | "equalizer" => app.show_equalizer = !app.show_equalizer,
                     "art" | "album_art" => app.show_album_art = !app.show_album_art,
+                    "meta" | "metadata" | "info" => app.show_metadata = !app.show_metadata,
                     "lyrics" | "lrc" => app.show_lyrics = !app.show_lyrics,
                     "queue" => app.show_queue = !app.show_queue,
                     _ => {}
@@ -488,6 +492,7 @@ fn execute_command(app: &mut App, cmd: &str) {
                         app.show_visualizer = false;
                         app.show_equalizer = false;
                         app.show_album_art = false;
+                        app.show_metadata = false;
                         app.show_lyrics = false;
                         app.show_queue = true;
                     }
@@ -495,6 +500,7 @@ fn execute_command(app: &mut App, cmd: &str) {
                         app.show_visualizer = true;
                         app.show_equalizer = true;
                         app.show_album_art = true;
+                        app.show_metadata = true;
                         app.show_lyrics = true;
                         app.show_queue = true;
                     }
@@ -502,6 +508,7 @@ fn execute_command(app: &mut App, cmd: &str) {
                         app.show_visualizer = true;
                         app.show_equalizer = true;
                         app.show_album_art = true;
+                        app.show_metadata = true;
                         app.show_lyrics = false;
                         app.show_queue = true;
                     }
@@ -544,6 +551,7 @@ fn execute_command(app: &mut App, cmd: &str) {
                                 if track_path.exists() {
                                     if let Ok(track) = mpui_core::metadata::read_metadata(&track_path) {
                                         let id = track.id;
+                                        app.library.insert(track);
                                         app.queue.push(id);
                                     }
                                 }
@@ -551,6 +559,7 @@ fn execute_command(app: &mut App, cmd: &str) {
                         }
                     } else if let Ok(track) = mpui_core::metadata::read_metadata(&path) {
                         let id = track.id;
+                        app.library.insert(track.clone());
                         app.queue.push(id);
                         let _ = app.command_tx.send(PlayerCommand::Play(track.path.clone()));
                         app.current_art = mpui_core::metadata::extract_cover_art(&track.path).map(|art| (id, art));
@@ -610,11 +619,17 @@ fn move_cursor_down(app: &mut App) {
     match app.focused_panel {
         FocusedPanel::Library => {
             let max = app.library.len().saturating_sub(1);
-            app.library_cursor = (app.library_cursor + 1).min(max);
+            if app.library_cursor < max {
+                app.library_cursor += 1;
+                app.metadata_scroll = 0;
+            }
         }
         FocusedPanel::Queue => {
             let max = app.queue.len().saturating_sub(1);
-            app.queue_cursor = (app.queue_cursor + 1).min(max);
+            if app.queue_cursor < max {
+                app.queue_cursor += 1;
+                app.metadata_scroll = 0;
+            }
         }
         FocusedPanel::Equalizer => {
             app.eq_gains[app.eq_cursor] = (app.eq_gains[app.eq_cursor] - 1.0).max(-12.0);
@@ -623,6 +638,9 @@ fn move_cursor_down(app: &mut App) {
                 gain: app.eq_gains[app.eq_cursor],
             });
         }
+        FocusedPanel::Metadata => {
+            app.metadata_scroll = app.metadata_scroll.saturating_add(1);
+        }
         _ => {}
     }
 }
@@ -630,10 +648,16 @@ fn move_cursor_down(app: &mut App) {
 fn move_cursor_up(app: &mut App) {
     match app.focused_panel {
         FocusedPanel::Library => {
-            app.library_cursor = app.library_cursor.saturating_sub(1);
+            if app.library_cursor > 0 {
+                app.library_cursor -= 1;
+                app.metadata_scroll = 0;
+            }
         }
         FocusedPanel::Queue => {
-            app.queue_cursor = app.queue_cursor.saturating_sub(1);
+            if app.queue_cursor > 0 {
+                app.queue_cursor -= 1;
+                app.metadata_scroll = 0;
+            }
         }
         FocusedPanel::Equalizer => {
             app.eq_gains[app.eq_cursor] = (app.eq_gains[app.eq_cursor] + 1.0).min(12.0);
@@ -641,6 +665,9 @@ fn move_cursor_up(app: &mut App) {
                 band: app.eq_cursor,
                 gain: app.eq_gains[app.eq_cursor],
             });
+        }
+        FocusedPanel::Metadata => {
+            app.metadata_scroll = app.metadata_scroll.saturating_sub(1);
         }
         _ => {}
     }
@@ -650,9 +677,11 @@ fn move_cursor_bottom(app: &mut App) {
     match app.focused_panel {
         FocusedPanel::Library => {
             app.library_cursor = app.library.len().saturating_sub(1);
+            app.metadata_scroll = 0;
         }
         FocusedPanel::Queue => {
             app.queue_cursor = app.queue.len().saturating_sub(1);
+            app.metadata_scroll = 0;
         }
         _ => {}
     }
@@ -672,6 +701,9 @@ fn cycle_focus(app: &mut App, forward: bool) {
     }
     if app.show_album_art {
         panels.push(AlbumArt);
+    }
+    if app.show_metadata {
+        panels.push(Metadata);
     }
     if app.show_lyrics {
         panels.push(Lyrics);

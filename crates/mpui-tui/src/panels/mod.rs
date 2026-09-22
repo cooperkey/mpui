@@ -8,3 +8,4 @@ pub mod album_art;
 pub mod equalizer;
 pub mod lyrics;
 pub mod help;
+pub mod metadata;

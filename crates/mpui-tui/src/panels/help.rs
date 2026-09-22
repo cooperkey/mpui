@@ -70,6 +70,7 @@ pub fn render(frame: &mut Frame, _area: Rect, app: &App) {
             "Panel Toggles",
             &[
                 ("c", "Toggle Album Art display"),
+                ("i", "Toggle Metadata / Track Info"),
                 ("v", "Toggle Spectrum Visualizer"),
                 ("e", "Toggle 10-Band Equalizer"),
                 ("y", "Toggle Synchronized Lyrics"),

@@ -1,7 +1,7 @@
-/// Re-exported types used across crate boundaries.
-///
-/// Kept in a separate module to avoid circular dependency on the full config struct
-/// when only type definitions are needed.
+//! Re-exported types used across crate boundaries.
+//!
+//! Kept in a separate module to avoid circular dependency on the full config struct
+//! when only type definitions are needed.
 
 use serde::{Deserialize, Serialize};
 
@@ -41,10 +41,12 @@ impl Volume {
         self.0 as f32 / 100.0
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn add(self, step: u8) -> Self {
         Self::new(self.0.saturating_add(step))
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn sub(self, step: u8) -> Self {
         Self::new(self.0.saturating_sub(step))
     }

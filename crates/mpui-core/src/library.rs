@@ -168,6 +168,14 @@ impl Library {
         });
     }
 
+    pub fn insert(&mut self, track: Track) {
+        let id = track.id;
+        if !self.tracks.contains_key(&id) {
+            self.order.push(id);
+        }
+        self.tracks.insert(id, track);
+    }
+
     pub fn get(&self, id: TrackId) -> Option<&Track> {
         self.tracks.get(&id)
     }

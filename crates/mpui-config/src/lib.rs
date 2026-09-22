@@ -16,6 +16,7 @@ pub struct Config {
     pub visualizer: VisualizerConfig,
     pub equalizer: EqualizerConfig,
     pub album_art: AlbumArtConfig,
+    pub metadata: MetadataConfig,
     pub layout: LayoutConfig,
     pub theme: ThemeConfig,
     pub keybindings: HashMap<String, String>,
@@ -32,6 +33,7 @@ impl Default for Config {
             visualizer: VisualizerConfig::default(),
             equalizer: EqualizerConfig::default(),
             album_art: AlbumArtConfig::default(),
+            metadata: MetadataConfig::default(),
             layout: LayoutConfig::default(),
             theme: ThemeConfig::default(),
             keybindings: default_keybindings(),
@@ -197,6 +199,20 @@ impl Default for AlbumArtConfig {
             max_colors: 256,
             fallback_path: None,
             dither: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MetadataConfig {
+    pub enabled: bool,
+}
+
+impl Default for MetadataConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
         }
     }
 }

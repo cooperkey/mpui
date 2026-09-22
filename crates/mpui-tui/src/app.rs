@@ -27,8 +27,26 @@ pub enum FocusedPanel {
     Visualizer,
     Equalizer,
     AlbumArt,
+    Metadata,
     Lyrics,
 }
+
+pub struct ArtRequest {
+    pub track_id: mpui_core::track::TrackId,
+    pub path: std::path::PathBuf,
+    pub width: u16,
+    pub height: u16,
+}
+
+pub struct ArtResponse {
+    pub track_id: mpui_core::track::TrackId,
+    pub width: u16,
+    pub height: u16,
+    pub lines: Option<Arc<Vec<ratatui::text::Line<'static>>>>,
+}
+
+pub type ArtCache =
+    std::collections::HashMap<(mpui_core::track::TrackId, u16, u16), Option<Arc<Vec<ratatui::text::Line<'static>>>>>;
 
 /// Top-level application state shared across the TUI.
 pub struct App {
@@ -70,11 +88,19 @@ pub struct App {
     pub show_visualizer: bool,
     pub show_equalizer: bool,
     pub show_album_art: bool,
+    pub show_metadata: bool,
+    pub metadata_scroll: u16,
     pub show_queue: bool,
     pub show_lyrics: bool,
     pub current_lyrics: Option<Vec<(std::time::Duration, String)>>,
     pub visualizer_bars: Vec<f32>,
     pub show_help: bool,
+
+    pub art_cache: ArtCache,
+    pub art_cache_order: std::collections::VecDeque<(mpui_core::track::TrackId, u16, u16)>,
+    pub art_request_tx: Sender<ArtRequest>,
+    pub art_response_rx: crossbeam_channel::Receiver<ArtResponse>,
+    pub pending_art_request: Option<(mpui_core::track::TrackId, u16, u16)>,
 }
 
 impl App {
@@ -88,6 +114,40 @@ impl App {
         let show_viz = config.visualizer.enabled;
         let show_eq = config.equalizer.enabled;
         let show_art = config.album_art.enabled;
+        let show_meta = config.metadata.enabled;
+
+        let (art_tx, art_rx) = crossbeam_channel::unbounded::<ArtRequest>();
+        let (resp_tx, resp_rx) = crossbeam_channel::unbounded::<ArtResponse>();
+
+        std::thread::Builder::new()
+            .name("mpui-art-worker".into())
+            .spawn(move || {
+                while let Ok(mut req) = art_rx.recv() {
+                    // Drain superseded requests during fast scrolling
+                    while let Ok(newer) = art_rx.try_recv() {
+                        req = newer;
+                    }
+
+                    let lines = if let Some(bytes) = mpui_core::metadata::extract_cover_art(&req.path) {
+                        let rendered = crate::panels::album_art::render_image_halfblock(&bytes, req.width, req.height);
+                        if rendered.is_empty() {
+                            None
+                        } else {
+                            Some(Arc::new(rendered))
+                        }
+                    } else {
+                        None
+                    };
+
+                    let _ = resp_tx.send(ArtResponse {
+                        track_id: req.track_id,
+                        width: req.width,
+                        height: req.height,
+                        lines,
+                    });
+                }
+            })
+            .expect("failed to spawn art worker thread");
 
         Self {
             config,
@@ -121,11 +181,18 @@ impl App {
             show_visualizer: show_viz,
             show_equalizer: show_eq,
             show_album_art: show_art,
+            show_metadata: show_meta,
+            metadata_scroll: 0,
             show_queue: true,
             show_lyrics: false,
             current_lyrics: None,
             visualizer_bars: Vec::new(),
             show_help: false,
+            art_cache: std::collections::HashMap::with_capacity(128),
+            art_cache_order: std::collections::VecDeque::with_capacity(128),
+            art_request_tx: art_tx,
+            art_response_rx: resp_rx,
+            pending_art_request: None,
         }
     }
 
@@ -185,10 +252,68 @@ impl App {
         self.show_visualizer = config.visualizer.enabled;
         self.show_equalizer = config.equalizer.enabled;
         self.show_album_art = config.album_art.enabled;
+        self.show_metadata = config.metadata.enabled;
         let _ = self
             .command_tx
             .send(PlayerCommand::SetReplayGainMode(config.audio.replaygain.clone()));
         self.config = config;
+    }
+
+    pub fn update_art_cache(&mut self) {
+        while let Ok(resp) = self.art_response_rx.try_recv() {
+            let key = (resp.track_id, resp.width, resp.height);
+            if self.pending_art_request == Some(key) {
+                self.pending_art_request = None;
+            }
+            if self.art_cache.len() >= 128 {
+                if let Some(oldest) = self.art_cache_order.pop_front() {
+                    self.art_cache.remove(&oldest);
+                }
+            }
+            self.art_cache.insert(key, resp.lines);
+            self.art_cache_order.push_back(key);
+        }
+    }
+
+    pub fn selected_track(&self) -> Option<&mpui_core::track::Track> {
+        self.selected_track_id().and_then(|id| self.library.get(id))
+    }
+
+    pub fn selected_track_id(&self) -> Option<mpui_core::track::TrackId> {
+        if self.input_mode == InputMode::Search {
+            if let Some(&(idx, _)) = self.search_results.get(self.search_cursor) {
+                if let Some(&id) = self.library.track_ids().get(idx) {
+                    return Some(id);
+                }
+            }
+        }
+
+        if self.focused_panel == FocusedPanel::Queue {
+            if let Some(&id) = self.queue.items().get(self.queue_cursor) {
+                return Some(id);
+            }
+        }
+
+        if self.focused_panel == FocusedPanel::Library {
+            if let Some(&id) = self.library.track_ids().get(self.library_cursor) {
+                return Some(id);
+            }
+        }
+
+        // Fallbacks when focus is elsewhere
+        if let Some(&id) = self.library.track_ids().get(self.library_cursor) {
+            return Some(id);
+        }
+
+        if let Some(id) = self.queue.current_track() {
+            return Some(id);
+        }
+
+        if let Some(&id) = self.queue.items().get(self.queue_cursor) {
+            return Some(id);
+        }
+
+        None
     }
 
     pub fn play_track_at_index(&mut self, id: mpui_core::track::TrackId) {

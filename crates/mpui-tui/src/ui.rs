@@ -37,6 +37,7 @@ fn render_narrow(frame: &mut Frame, size: Rect, app: &mut App) {
         FocusedPanel::Visualizer => panels::visualizer::render(frame, chunks[1], app),
         FocusedPanel::Equalizer => panels::equalizer::render(frame, chunks[1], app),
         FocusedPanel::AlbumArt => panels::album_art::render(frame, chunks[1], app),
+        FocusedPanel::Metadata => panels::metadata::render(frame, chunks[1], app),
         FocusedPanel::Lyrics => panels::lyrics::render(frame, chunks[1], app),
         FocusedPanel::Library => panels::library::render(frame, chunks[1], app),
     }
@@ -59,11 +60,11 @@ fn render_widescreen(frame: &mut Frame, size: Rect, app: &mut App) {
     panels::status::render(frame, outer_chunks[2], app);
 
     // Center workspace split horizontally:
-    // Left column (62%): Library + Queue (wide landscape rectangle: length > height)
-    // Right column (38%): Album art (square on the side) + dynamic DSP panels (visualizer/eq/lyrics)
+    // Left column (55%): Library + Queue (wide landscape rectangle)
+    // Right column (45%): Top square panes (Album art + Metadata) + dynamic DSP panels
     let center_cols = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(62), Constraint::Percentage(38)])
+        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
         .split(outer_chunks[1]);
 
     // Left Column: Library & Queue
@@ -78,7 +79,7 @@ fn render_widescreen(frame: &mut Frame, size: Rect, app: &mut App) {
         panels::library::render(frame, center_cols[0], app);
     }
 
-    // Right Column: Album art (square on the side) + dynamic DSP panels
+    // Right Column: Album art & Metadata squares + dynamic DSP panels
     let right_area = center_cols[1];
 
     enum DspPanel {
@@ -98,25 +99,33 @@ fn render_widescreen(frame: &mut Frame, size: Rect, app: &mut App) {
         dsp_panels.push(DspPanel::Equalizer);
     }
 
-    if app.show_album_art && !dsp_panels.is_empty() {
+    let has_top = app.show_album_art || app.show_metadata;
+
+    if has_top && !dsp_panels.is_empty() {
         let dsp_count = dsp_panels.len();
-        let max_art_height = match dsp_count {
-            1 => 13,
-            2 => 10,
+        let max_top_height = match dsp_count {
+            1 => 14,
+            2 => 11,
             _ => 8,
         };
-        let fair_share = (right_area.height as usize / (dsp_count + 1)) as u16;
-        let square_height = fair_share.clamp(7, max_art_height);
+        let target_sq_height = if app.show_album_art && app.show_metadata {
+            (right_area.width / 4).max(7)
+        } else {
+            (right_area.width / 2).max(7)
+        };
+        let square_height = target_sq_height
+            .min(max_top_height)
+            .min(right_area.height.saturating_sub(4));
 
         let right_splits = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(square_height), // compact square album art
+                Constraint::Length(square_height), // compact square panes
                 Constraint::Min(1),                 // generous room for visualizer & equalizer
             ])
             .split(right_area);
 
-        panels::album_art::render(frame, right_splits[0], app);
+        render_top_squares(frame, right_splits[0], app);
 
         let dsp_constraints: Vec<Constraint> = dsp_panels
             .iter()
@@ -135,8 +144,23 @@ fn render_widescreen(frame: &mut Frame, size: Rect, app: &mut App) {
                 DspPanel::Equalizer => panels::equalizer::render(frame, *chunk, app),
             }
         }
-    } else if app.show_album_art {
-        panels::album_art::render(frame, right_area, app);
+    } else if has_top {
+        let target_sq_height = if app.show_album_art && app.show_metadata {
+            (right_area.width / 4).max(7)
+        } else {
+            (right_area.width / 2).max(7)
+        };
+        let square_height = target_sq_height.min(right_area.height);
+
+        let right_splits = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(square_height),
+                Constraint::Min(0),
+            ])
+            .split(right_area);
+
+        render_top_squares(frame, right_splits[0], app);
     } else if !dsp_panels.is_empty() {
         let dsp_constraints: Vec<Constraint> = dsp_panels
             .iter()
@@ -155,5 +179,21 @@ fn render_widescreen(frame: &mut Frame, size: Rect, app: &mut App) {
                 DspPanel::Equalizer => panels::equalizer::render(frame, *chunk, app),
             }
         }
+    }
+}
+
+fn render_top_squares(frame: &mut Frame, area: Rect, app: &mut App) {
+    if app.show_album_art && app.show_metadata {
+        let splits = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(area);
+
+        panels::album_art::render(frame, splits[0], app);
+        panels::metadata::render(frame, splits[1], app);
+    } else if app.show_album_art {
+        panels::album_art::render(frame, area, app);
+    } else if app.show_metadata {
+        panels::metadata::render(frame, area, app);
     }
 }

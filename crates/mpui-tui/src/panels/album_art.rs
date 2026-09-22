@@ -27,7 +27,7 @@ pub fn render_image_halfblock(img_bytes: &[u8], width: u16, height: u16) -> Vec<
     let resized = img.resize_exact(target_width, target_height, FilterType::Triangle).into_rgba8();
 
     let pad_left = ((max_w - target_width) / 2) as usize;
-    let rows = (target_height + 1) / 2;
+    let rows = target_height.div_ceil(2);
     let total_rows = height.saturating_sub(2) as usize;
     let pad_top = total_rows.saturating_sub(rows as usize) / 2;
 
@@ -61,6 +61,8 @@ pub fn render_image_halfblock(img_bytes: &[u8], width: u16, height: u16) -> Vec<
 }
 
 pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
+    app.update_art_cache();
+
     let active = app.focused_panel == FocusedPanel::AlbumArt;
     let border_color = if active {
         app.theme.border_focused
@@ -81,35 +83,165 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
         .border_style(Style::default().fg(border_color));
 
     let inner = block.inner(area);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
 
-    if let Some((track_id, ref img_bytes)) = app.current_art {
-        let is_cached = match &app.cached_art {
-            Some((id, w, h, _)) => *id == track_id && *w == area.width && *h == area.height,
-            None => false,
-        };
+    let selected = app.selected_track().cloned();
+    if let Some(track) = selected {
+        let key = (track.id, area.width, area.height);
+        let cached_exact = app.art_cache.get(&key).cloned();
+        match cached_exact {
+            Some(Some(lines)) => {
+                let widget = Paragraph::new((*lines).clone())
+                    .block(block)
+                    .alignment(Alignment::Center);
+                frame.render_widget(widget, area);
+            }
+            Some(None) => {
+                render_placeholder(frame, area, block, inner.height, "no art", app.theme.muted_fg);
+            }
+            None => {
+                if app.pending_art_request != Some(key) {
+                    let _ = app.art_request_tx.send(crate::app::ArtRequest {
+                        track_id: track.id,
+                        path: track.path.clone(),
+                        width: area.width,
+                        height: area.height,
+                    });
+                    app.pending_art_request = Some(key);
+                }
 
-        if !is_cached {
-            let rendered = render_image_halfblock(img_bytes, area.width, area.height);
-            app.cached_art = Some((track_id, area.width, area.height, rendered));
-        }
+                // Fallback to cached render of the same track at different dimensions if available
+                let fallback = app.art_cache.iter().find_map(|((id, _, _), opt)| {
+                    if *id == track.id {
+                        opt.as_ref().cloned()
+                    } else {
+                        None
+                    }
+                });
 
-        if let Some((_, _, _, ref lines)) = app.cached_art {
-            let widget = Paragraph::new(lines.clone())
-                .block(block)
-                .alignment(Alignment::Center);
-            frame.render_widget(widget, area);
+                if let Some(lines) = fallback {
+                    let widget = Paragraph::new((*lines).clone())
+                        .block(block)
+                        .alignment(Alignment::Center);
+                    frame.render_widget(widget, area);
+                } else {
+                    render_placeholder(frame, area, block, inner.height, "...", app.theme.muted_fg);
+                }
+            }
         }
     } else {
-        app.cached_art = None;
-        let placeholder = "no art";
-        let height = inner.height;
-        let pad = height.saturating_sub(1) / 2;
-        let padding = "\n".repeat(pad as usize);
-        let text = format!("{}{}", padding, placeholder);
+        render_placeholder(frame, area, block, inner.height, "no art", app.theme.muted_fg);
+    }
+}
 
-        let widget = Paragraph::new(text)
-            .block(block)
-            .alignment(Alignment::Center);
-        frame.render_widget(widget, area);
+fn render_placeholder(
+    frame: &mut Frame,
+    area: Rect,
+    block: Block,
+    height: u16,
+    placeholder: &str,
+    color: Color,
+) {
+    let pad = height.saturating_sub(1) / 2;
+    let padding = "\n".repeat(pad as usize);
+    let text = format!("{}{}", padding, placeholder);
+
+    let widget = Paragraph::new(text)
+        .block(block)
+        .style(Style::default().fg(color))
+        .alignment(Alignment::Center);
+    frame.render_widget(widget, area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+    use std::sync::Arc;
+    use parking_lot::Mutex;
+    use mpui_audio::player::PlaybackState;
+
+    #[test]
+    fn test_album_art_render_empty() {
+        let backend = TestBackend::new(30, 15);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        let config = mpui_config::Config::default();
+        let playback = Arc::new(Mutex::new(PlaybackState::default()));
+        let (tx, _) = crossbeam_channel::unbounded();
+        let spectrum = Arc::new(Mutex::new(Vec::new()));
+        let mut app = App::new(config, playback, tx, spectrum);
+
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                render(f, area, &mut app);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let content = buffer
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>();
+        assert!(content.contains("no art"));
+    }
+
+    #[test]
+    fn test_album_art_render_cached() {
+        let backend = TestBackend::new(30, 15);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        let config = mpui_config::Config::default();
+        let playback = Arc::new(Mutex::new(PlaybackState::default()));
+        let (tx, _) = crossbeam_channel::unbounded();
+        let spectrum = Arc::new(Mutex::new(Vec::new()));
+        let mut app = App::new(config, playback, tx, spectrum);
+
+        let track = mpui_core::track::Track {
+            id: mpui_core::track::TrackId(101),
+            path: std::path::PathBuf::from("/music/song.mp3"),
+            title: Some("Song".into()),
+            artist: Some("Artist".into()),
+            album: Some("Album".into()),
+            album_artist: None,
+            genre: None,
+            year: None,
+            track_number: None,
+            disc_number: None,
+            duration: None,
+            sample_rate: None,
+            channels: None,
+            bitrate: None,
+            format: "mp3".into(),
+            replay_gain_track: None,
+            replay_gain_album: None,
+        };
+
+        app.library.insert(track);
+        app.library_cursor = 0;
+
+        let rendered_line = Line::from(vec![Span::raw("ART_CONTENT")]);
+        let key = (mpui_core::track::TrackId(101), 30, 15);
+        app.art_cache.insert(key, Some(Arc::new(vec![rendered_line])));
+
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                render(f, area, &mut app);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let content = buffer
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect::<String>();
+        assert!(content.contains("ART_CONTENT"));
     }
 }
