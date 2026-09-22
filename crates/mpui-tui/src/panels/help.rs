@@ -35,6 +35,8 @@ pub fn render(frame: &mut Frame, _area: Rect, app: &App) {
                 ("Space", "Play / Pause playback"),
                 ("h / Left", "Seek backward 5 seconds"),
                 ("l / Right", "Seek forward 5 seconds"),
+                ("0", "Seek to start of track"),
+                ("$", "Seek to end of track"),
                 ("> / <", "Next / Previous track in queue"),
                 ("+ / -", "Volume up / down (step configurable)"),
                 ("m", "Toggle audio mute"),

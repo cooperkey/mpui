@@ -48,6 +48,8 @@ pub enum KeyAction {
     ScrollHalfDown,
     ScrollHalfUp,
     ToggleHelp,
+    SeekStart,
+    SeekEnd,
 }
 
 fn resolve_action(key_str: &str, config: &mpui_config::Config) -> Option<KeyAction> {
@@ -59,6 +61,8 @@ fn resolve_action(key_str: &str, config: &mpui_config::Config) -> Option<KeyActi
             "jump_bottom" => Some(KeyAction::JumpBottom),
             "collapse_or_seek_back" => Some(KeyAction::CollapseOrSeekBack),
             "expand_or_seek_forward" => Some(KeyAction::ExpandOrSeekForward),
+            "seek_start" | "seek_beginning" | "seek_first" => Some(KeyAction::SeekStart),
+            "seek_end" | "seek_last" => Some(KeyAction::SeekEnd),
             "confirm" => Some(KeyAction::Confirm),
             "toggle_pause" => Some(KeyAction::TogglePause),
             "search" => Some(KeyAction::Search),
@@ -100,6 +104,8 @@ fn resolve_action(key_str: &str, config: &mpui_config::Config) -> Option<KeyActi
         "up" => Some(KeyAction::MoveUp),
         "left" => Some(KeyAction::CollapseOrSeekBack),
         "right" => Some(KeyAction::ExpandOrSeekForward),
+        "0" => Some(KeyAction::SeekStart),
+        "$" => Some(KeyAction::SeekEnd),
         "pagedown" | "page_down" => Some(KeyAction::ScrollHalfDown),
         "pageup" | "page_up" => Some(KeyAction::ScrollHalfUp),
         "home" => Some(KeyAction::JumpTop),
@@ -233,6 +239,20 @@ fn execute_action(app: &mut App, action: KeyAction) {
                 };
                 state.position = new_pos;
                 let _ = app.command_tx.send(PlayerCommand::Seek(new_pos));
+            }
+        }
+        KeyAction::SeekStart => {
+            let mut state = app.playback.lock();
+            state.position = std::time::Duration::ZERO;
+            let _ = app.command_tx.send(PlayerCommand::Seek(std::time::Duration::ZERO));
+        }
+        KeyAction::SeekEnd => {
+            let mut state = app.playback.lock();
+            let dur = state.duration;
+            if dur > std::time::Duration::ZERO {
+                let end_pos = dur.saturating_sub(std::time::Duration::from_millis(500));
+                state.position = end_pos;
+                let _ = app.command_tx.send(PlayerCommand::Seek(end_pos));
             }
         }
         KeyAction::Confirm => handle_confirm(app),
@@ -413,7 +433,15 @@ fn execute_command(app: &mut App, cmd: &str) {
         }
         Some("seek") => {
             if let Some(arg) = parts.get(1) {
-                if let Some(dur) = parse_duration_str(arg) {
+                if *arg == "$" || *arg == "end" {
+                    let mut state = app.playback.lock();
+                    let dur = state.duration;
+                    if dur > std::time::Duration::ZERO {
+                        let end_pos = dur.saturating_sub(std::time::Duration::from_millis(500));
+                        state.position = end_pos;
+                        let _ = app.command_tx.send(PlayerCommand::Seek(end_pos));
+                    }
+                } else if let Some(dur) = parse_duration_str(arg) {
                     let _ = app.command_tx.send(PlayerCommand::Seek(dur));
                 }
             }

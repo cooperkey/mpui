@@ -328,6 +328,8 @@ fn default_keybindings() -> HashMap<String, String> {
         ("z z", "center_current"),
         ("c-d", "scroll_half_down"),
         ("c-u", "scroll_half_up"),
+        ("0", "seek_start"),
+        ("$", "seek_end"),
         ("?", "toggle_help"),
         ("f1", "toggle_help"),
     ];
