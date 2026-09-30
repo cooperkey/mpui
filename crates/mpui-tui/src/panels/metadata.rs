@@ -15,7 +15,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         app.theme.border
     };
 
-    let title = app.panel_title("metadata", "focus_metadata", active);
+    let title = app.panel_title("data", "focus_metadata", active);
 
     let block = Block::default()
         .title(title)
@@ -56,7 +56,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     // 2. Artist
     lines.push(Line::from(vec![
         Span::styled("Artist  ", Style::default().fg(app.theme.muted_fg)),
-        Span::styled(track.display_artist(), Style::default().fg(app.theme.playing_fg)),
+        Span::styled(
+            track.display_artist(),
+            Style::default().fg(app.theme.playing_fg),
+        ),
     ]));
 
     // 3. Album
@@ -77,7 +80,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         .unwrap_or_else(|| "----".into());
     lines.push(Line::from(vec![
         Span::styled("No/Year ", Style::default().fg(app.theme.muted_fg)),
-        Span::styled(format!("{track_str} • {year_str}"), Style::default().fg(app.theme.fg)),
+        Span::styled(
+            format!("{track_str} • {year_str}"),
+            Style::default().fg(app.theme.fg),
+        ),
     ]));
 
     // 5. Genre
@@ -120,7 +126,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     if let Some(br) = track.bitrate {
         lines.push(Line::from(vec![
             Span::styled("Bitrate ", Style::default().fg(app.theme.muted_fg)),
-            Span::styled(format!("{} kbps", br / 1000), Style::default().fg(app.theme.fg)),
+            Span::styled(
+                format!("{} kbps", br / 1000),
+                Style::default().fg(app.theme.fg),
+            ),
         ]));
     }
 
@@ -151,11 +160,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mpui_audio::player::PlaybackState;
+    use parking_lot::Mutex;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
     use std::sync::Arc;
-    use parking_lot::Mutex;
-    use mpui_audio::player::PlaybackState;
 
     #[test]
     fn test_metadata_render_empty() {
