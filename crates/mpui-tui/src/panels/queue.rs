@@ -1,5 +1,4 @@
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem};
 use ratatui::Frame;
@@ -9,19 +8,13 @@ use crate::app::{App, FocusedPanel};
 /// Render the queue panel — ordered list of queued tracks with current indicator.
 pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
     let is_focused = app.focused_panel == FocusedPanel::Queue;
-    let border_color = if is_focused {
-        app.theme.border_focused
-    } else {
-        app.theme.border
-    };
-
     let title = app.panel_title("queue", "focus_queue", is_focused);
 
     let block = Block::default()
         .title(title)
-        .title_style(Style::default().fg(app.theme.title))
+        .title_style(app.theme.title_style(is_focused))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color));
+        .border_style(app.theme.border_style(is_focused));
 
     let current_index = app.queue.current_index();
 
@@ -39,11 +32,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
                 .unwrap_or("unknown");
 
             let style = if is_current {
-                Style::default()
-                    .fg(app.theme.playing_fg)
-                    .add_modifier(Modifier::BOLD)
+                app.theme.playing_style()
             } else {
-                Style::default().fg(app.theme.fg)
+                app.theme.fg_style()
             };
 
             let prefix = if is_current { "▶ " } else { "  " };
@@ -58,24 +49,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
 
     app.queue_state.select(Some(app.queue_cursor));
 
-    let highlight_style = if is_focused {
-        if app.theme.selection_bg == ratatui::style::Color::Reset {
-            Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
-        } else {
-            Style::default()
-                .bg(app.theme.selection_bg)
-                .fg(app.theme.selection_fg)
-                .add_modifier(Modifier::BOLD)
-        }
-    } else {
-        if app.theme.selection_bg == ratatui::style::Color::Reset {
-            Style::default().add_modifier(Modifier::DIM)
-        } else {
-            Style::default()
-                .bg(app.theme.selection_bg)
-                .fg(app.theme.muted_fg)
-        }
-    };
+    let highlight_style = app.theme.selection_style(is_focused);
 
     let list = List::new(items)
         .block(block)

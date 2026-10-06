@@ -1,5 +1,4 @@
 use ratatui::layout::Rect;
-use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
@@ -9,19 +8,13 @@ use crate::app::App;
 /// Render the visualizer panel — spectrum bars from FFT data.
 pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
     let is_focused = app.focused_panel == crate::app::FocusedPanel::Visualizer;
-    let border_color = if is_focused {
-        app.theme.border_focused
-    } else {
-        app.theme.border
-    };
-
     let title = app.panel_title("visualizer", "focus_visualizer", is_focused);
 
     let block = Block::default()
         .title(title)
-        .title_style(Style::default().fg(app.theme.title))
+        .title_style(app.theme.title_style(is_focused))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color));
+        .border_style(app.theme.border_style(is_focused));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -97,7 +90,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
     }
 
     let height = inner.height as usize;
-    let bar_color = app.theme.playing_fg;
+    let bar_style = app.theme.playing_style();
 
     // Render each row from top to bottom.
     let lines: Vec<Line> = (0..height)
@@ -120,7 +113,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
                         bar_chars[idx].as_str()
                     };
                     std::iter::repeat_n(
-                        Span::styled(ch, Style::default().fg(bar_color)),
+                        Span::styled(ch, bar_style),
                         bar_width,
                     )
                 })

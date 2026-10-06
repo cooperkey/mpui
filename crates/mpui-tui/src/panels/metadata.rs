@@ -1,5 +1,4 @@
 use ratatui::layout::{Alignment, Rect};
-use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
@@ -9,19 +8,13 @@ use crate::app::{App, FocusedPanel};
 /// Render the metadata and technical specs of the currently selected media.
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let active = app.focused_panel == FocusedPanel::Metadata;
-    let border_color = if active {
-        app.theme.border_focused
-    } else {
-        app.theme.border
-    };
-
     let title = app.panel_title("data", "focus_metadata", active);
 
     let block = Block::default()
         .title(title)
-        .title_style(Style::default().fg(app.theme.title))
+        .title_style(app.theme.title_style(active))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color));
+        .border_style(app.theme.border_style(active));
 
     let inner = block.inner(area);
     if inner.width == 0 || inner.height == 0 {
@@ -34,7 +27,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         let text = format!("{}no media selected", padding);
         let widget = Paragraph::new(text)
             .block(block)
-            .style(Style::default().fg(app.theme.muted_fg))
+            .style(app.theme.muted_style())
             .alignment(Alignment::Center);
         frame.render_widget(widget, area);
         return;
@@ -44,28 +37,26 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     // 1. Title (highlighted bold)
     lines.push(Line::from(vec![
-        Span::styled("Title   ", Style::default().fg(app.theme.muted_fg)),
+        Span::styled("Title   ", app.theme.muted_style()),
         Span::styled(
             track.display_title(),
-            Style::default()
-                .fg(app.theme.title)
-                .add_modifier(Modifier::BOLD),
+            app.theme.title_style(true),
         ),
     ]));
 
     // 2. Artist
     lines.push(Line::from(vec![
-        Span::styled("Artist  ", Style::default().fg(app.theme.muted_fg)),
+        Span::styled("Artist  ", app.theme.muted_style()),
         Span::styled(
             track.display_artist(),
-            Style::default().fg(app.theme.playing_fg),
+            app.theme.playing_style(),
         ),
     ]));
 
     // 3. Album
     lines.push(Line::from(vec![
-        Span::styled("Album   ", Style::default().fg(app.theme.muted_fg)),
-        Span::styled(track.display_album(), Style::default().fg(app.theme.fg)),
+        Span::styled("Album   ", app.theme.muted_style()),
+        Span::styled(track.display_album(), app.theme.fg_style()),
     ]));
 
     // 4. Track # & Year
@@ -79,25 +70,25 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         .map(|y| y.to_string())
         .unwrap_or_else(|| "----".into());
     lines.push(Line::from(vec![
-        Span::styled("No/Year ", Style::default().fg(app.theme.muted_fg)),
+        Span::styled("No/Year ", app.theme.muted_style()),
         Span::styled(
             format!("{track_str} • {year_str}"),
-            Style::default().fg(app.theme.fg),
+            app.theme.fg_style(),
         ),
     ]));
 
     // 5. Genre
     if let Some(ref genre) = track.genre {
         lines.push(Line::from(vec![
-            Span::styled("Genre   ", Style::default().fg(app.theme.muted_fg)),
-            Span::styled(genre.as_str(), Style::default().fg(app.theme.fg)),
+            Span::styled("Genre   ", app.theme.muted_style()),
+            Span::styled(genre.as_str(), app.theme.fg_style()),
         ]));
     }
 
     // 6. Length / Duration
     lines.push(Line::from(vec![
-        Span::styled("Length  ", Style::default().fg(app.theme.muted_fg)),
-        Span::styled(track.display_duration(), Style::default().fg(app.theme.fg)),
+        Span::styled("Length  ", app.theme.muted_style()),
+        Span::styled(track.display_duration(), app.theme.fg_style()),
     ]));
 
     // 7. Format & Codec Specs
@@ -118,17 +109,17 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         _ => fmt_str,
     };
     lines.push(Line::from(vec![
-        Span::styled("Format  ", Style::default().fg(app.theme.muted_fg)),
-        Span::styled(audio_spec, Style::default().fg(app.theme.fg)),
+        Span::styled("Format  ", app.theme.muted_style()),
+        Span::styled(audio_spec, app.theme.fg_style()),
     ]));
 
     // 8. Bitrate
     if let Some(br) = track.bitrate {
         lines.push(Line::from(vec![
-            Span::styled("Bitrate ", Style::default().fg(app.theme.muted_fg)),
+            Span::styled("Bitrate ", app.theme.muted_style()),
             Span::styled(
                 format!("{} kbps", br / 1000),
-                Style::default().fg(app.theme.fg),
+                app.theme.fg_style(),
             ),
         ]));
     }
@@ -136,16 +127,16 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     // 9. ReplayGain
     if let Some(rg) = track.replay_gain_track {
         lines.push(Line::from(vec![
-            Span::styled("Gain    ", Style::default().fg(app.theme.muted_fg)),
-            Span::styled(format!("{:+.2} dB", rg), Style::default().fg(app.theme.fg)),
+            Span::styled("Gain    ", app.theme.muted_style()),
+            Span::styled(format!("{:+.2} dB", rg), app.theme.fg_style()),
         ]));
     }
 
     // 10. File name
     if let Some(file_name) = track.path.file_name().and_then(|f| f.to_str()) {
         lines.push(Line::from(vec![
-            Span::styled("File    ", Style::default().fg(app.theme.muted_fg)),
-            Span::styled(file_name, Style::default().fg(app.theme.muted_fg)),
+            Span::styled("File    ", app.theme.muted_style()),
+            Span::styled(file_name, app.theme.muted_style()),
         ]));
     }
 

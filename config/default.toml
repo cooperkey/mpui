@@ -56,14 +56,14 @@ minimal = "horizontal [ library(50) vertical(50) [ now_playing(15) queue(85) ] ]
 bg = "default"
 fg = "default"
 border = "default"
-border_focused = "cyan"
+border_focused = "default"
 title = "default"
 selection_bg = "default"
 selection_fg = "default"
-playing_fg = "cyan"
+playing_fg = "default"
 progress_filled = "default"
-progress_empty = "darkgray"
-muted_fg = "darkgray"
+progress_empty = "default"
+muted_fg = "default"
 
 [playlist]
 save_format = "m3u"

@@ -1,5 +1,4 @@
 use ratatui::layout::Rect;
-use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
@@ -36,15 +35,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let line1 = Line::from(vec![
         Span::styled(
             format!(" {status_char} "),
-            Style::default().fg(app.theme.playing_fg),
+            app.theme.playing_style(),
         ),
-        Span::styled(artist, Style::default().fg(app.theme.muted_fg)),
+        Span::styled(artist, app.theme.muted_style()),
         Span::raw(" - "),
-        Span::styled(title, Style::default().fg(app.theme.fg)),
+        Span::styled(title, app.theme.fg_style()),
         Span::raw("  "),
         Span::styled(
             format!("{position} / {duration}"),
-            Style::default().fg(app.theme.muted_fg),
+            app.theme.muted_style(),
         ),
     ]);
 
@@ -61,18 +60,18 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         Span::raw(" "),
         Span::styled(
             "━".repeat(filled_count),
-            Style::default().fg(app.theme.progress_filled),
+            app.theme.progress_filled_style(),
         ),
         Span::styled(
             "─".repeat(empty_count),
-            Style::default().fg(app.theme.progress_empty),
+            app.theme.progress_empty_style(),
         ),
         Span::raw(" "),
     ]);
 
     let block = Block::default()
         .borders(Borders::TOP)
-        .border_style(Style::default().fg(app.theme.border));
+        .border_style(app.theme.border_style(false));
 
     let paragraph = Paragraph::new(vec![line1, line2]).block(block);
     frame.render_widget(paragraph, area);

@@ -1,5 +1,5 @@
 use ratatui::layout::{Alignment, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
@@ -9,19 +9,13 @@ use crate::app::{App, FocusedPanel};
 /// Render synchronized lyrics or static text.
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let is_focused = app.focused_panel == FocusedPanel::Lyrics;
-    let border_color = if is_focused {
-        app.theme.border_focused
-    } else {
-        app.theme.border
-    };
-
     let title = app.panel_title("lyrics", "focus_lyrics", is_focused);
 
     let block = Block::default()
         .title(title)
-        .title_style(Style::default().fg(app.theme.title))
+        .title_style(app.theme.title_style(is_focused))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color));
+        .border_style(app.theme.border_style(is_focused));
 
     let inner = block.inner(area);
     if inner.width == 0 || inner.height == 0 {
@@ -30,7 +24,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     if let Some(ref lyrics) = app.current_lyrics {
         if lyrics.is_empty() {
-            render_placeholder(frame, area, block, "empty lyrics");
+            render_placeholder(frame, area, block, "empty lyrics", app.theme.muted_style());
             return;
         }
 
@@ -55,13 +49,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         for (i, (_, text)) in lyrics[start_idx..end_idx].iter().enumerate() {
             let actual_i = start_idx + i;
             let style = if actual_i == active_idx {
-                Style::default()
-                    .fg(app.theme.playing_fg)
-                    .add_modifier(Modifier::BOLD)
+                app.theme.playing_style()
             } else if actual_i < active_idx {
-                Style::default().fg(app.theme.fg)
+                app.theme.fg_style()
             } else {
-                Style::default().fg(app.theme.muted_fg)
+                app.theme.muted_style()
             };
 
             lines.push(Line::from(Span::styled(text.clone(), style)));
@@ -73,11 +65,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
         frame.render_widget(p, area);
     } else {
-        render_placeholder(frame, area, block, "no lyrics available");
+        render_placeholder(frame, area, block, "no lyrics available", app.theme.muted_style());
     }
 }
 
-fn render_placeholder(frame: &mut Frame, area: Rect, block: Block, text: &str) {
+fn render_placeholder(frame: &mut Frame, area: Rect, block: Block, text: &str, style: Style) {
     let inner = block.inner(area);
     let pad = inner.height.saturating_sub(1) / 2;
     let padding = "\n".repeat(pad as usize);
@@ -85,6 +77,7 @@ fn render_placeholder(frame: &mut Frame, area: Rect, block: Block, text: &str) {
 
     let widget = Paragraph::new(content)
         .block(block)
+        .style(style)
         .alignment(Alignment::Center);
 
     frame.render_widget(widget, area);

@@ -8,6 +8,13 @@ use crate::panels;
 pub fn render(frame: &mut Frame, app: &mut App) {
     let size = frame.area();
 
+    if app.theme.bg != ratatui::style::Color::Reset {
+        frame.render_widget(
+            ratatui::widgets::Block::default().style(ratatui::style::Style::default().bg(app.theme.bg)),
+            size,
+        );
+    }
+
     // Narrow terminal responsive reflow (e.g., Termux on mobile portrait, width < 80)
     if size.width < 80 {
         render_narrow(frame, size, app);

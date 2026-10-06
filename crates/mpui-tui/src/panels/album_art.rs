@@ -64,19 +64,13 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
     app.update_art_cache();
 
     let active = app.focused_panel == FocusedPanel::AlbumArt;
-    let border_color = if active {
-        app.theme.border_focused
-    } else {
-        app.theme.border
-    };
-
     let title = app.panel_title("album art", "focus_album_art", active);
 
     let block = Block::default()
         .title(title)
-        .title_style(Style::default().fg(app.theme.title))
+        .title_style(app.theme.title_style(active))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color));
+        .border_style(app.theme.border_style(active));
 
     let inner = block.inner(area);
     if inner.width == 0 || inner.height == 0 {
@@ -95,7 +89,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
                 frame.render_widget(widget, area);
             }
             Some(None) => {
-                render_placeholder(frame, area, block, inner.height, "no art", app.theme.muted_fg);
+                render_placeholder(frame, area, block, inner.height, "no art", app.theme.muted_style());
             }
             None => {
                 if app.pending_art_request != Some(key) {
@@ -123,12 +117,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
                         .alignment(Alignment::Center);
                     frame.render_widget(widget, area);
                 } else {
-                    render_placeholder(frame, area, block, inner.height, "...", app.theme.muted_fg);
+                    render_placeholder(frame, area, block, inner.height, "...", app.theme.muted_style());
                 }
             }
         }
     } else {
-        render_placeholder(frame, area, block, inner.height, "no art", app.theme.muted_fg);
+        render_placeholder(frame, area, block, inner.height, "no art", app.theme.muted_style());
     }
 }
 
@@ -138,7 +132,7 @@ fn render_placeholder(
     block: Block,
     height: u16,
     placeholder: &str,
-    color: Color,
+    style: Style,
 ) {
     let pad = height.saturating_sub(1) / 2;
     let padding = "\n".repeat(pad as usize);
@@ -146,7 +140,7 @@ fn render_placeholder(
 
     let widget = Paragraph::new(text)
         .block(block)
-        .style(Style::default().fg(color))
+        .style(style)
         .alignment(Alignment::Center);
     frame.render_widget(widget, area);
 }

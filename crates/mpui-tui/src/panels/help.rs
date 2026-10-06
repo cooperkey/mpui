@@ -26,8 +26,8 @@ pub fn render(frame: &mut Frame, _area: Rect, app: &App) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(format!(" [keyboard shortcuts manual]{scroll_hint}"))
-        .title_style(Style::default().fg(app.theme.title).add_modifier(Modifier::BOLD))
-        .border_style(Style::default().fg(app.theme.border_focused));
+        .title_style(app.theme.title_style(true))
+        .border_style(app.theme.border_style(true));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -36,10 +36,10 @@ pub fn render(frame: &mut Frame, _area: Rect, app: &App) {
         return;
     }
 
-    let k_style = Style::default().fg(app.theme.playing_fg).add_modifier(Modifier::BOLD);
-    let desc_style = Style::default().fg(app.theme.fg);
-    let header_style = Style::default().fg(app.theme.title).add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
-    let muted_style = Style::default().fg(app.theme.muted_fg);
+    let k_style = app.theme.playing_style();
+    let desc_style = app.theme.fg_style();
+    let header_style = app.theme.title_style(true).add_modifier(Modifier::UNDERLINED);
+    let muted_style = app.theme.muted_style();
 
     let col1_sections: &[(&str, &[(&str, &str)])] = &[
         (

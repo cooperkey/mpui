@@ -1,5 +1,4 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph};
 use ratatui::Frame;
 
@@ -28,8 +27,8 @@ pub fn render(frame: &mut Frame, _area: Rect, app: &App) {
             Block::default()
                 .borders(Borders::ALL)
                 .title(" [search] ")
-                .title_style(Style::default().fg(app.theme.title))
-                .border_style(Style::default().fg(app.theme.border_focused)),
+                .title_style(app.theme.title_style(true))
+                .border_style(app.theme.border_style(true)),
         );
     
     frame.render_widget(search_input, chunks[0]);
@@ -45,14 +44,9 @@ pub fn render(frame: &mut Frame, _area: Rect, app: &App) {
         };
 
         let item = if i == app.search_cursor {
-            ListItem::new(text).style(
-                Style::default()
-                    .bg(app.theme.selection_bg)
-                    .fg(app.theme.selection_fg)
-                    .add_modifier(Modifier::BOLD),
-            )
+            ListItem::new(text).style(app.theme.selection_style(true))
         } else {
-            ListItem::new(text).style(Style::default().fg(app.theme.fg))
+            ListItem::new(text).style(app.theme.fg_style())
         };
         list_items.push(item);
     }
@@ -61,7 +55,7 @@ pub fn render(frame: &mut Frame, _area: Rect, app: &App) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(app.theme.border)),
+                .border_style(app.theme.border_style(false)),
         );
 
     frame.render_widget(results_list, chunks[1]);

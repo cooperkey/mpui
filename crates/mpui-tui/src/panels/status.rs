@@ -1,5 +1,4 @@
 use ratatui::layout::Rect;
-use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
@@ -38,9 +37,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             let total_len = cmd_text.len() + ghost_text.len() + hint_text.len();
             (
                 vec![
-                    Span::styled(cmd_text, Style::default().fg(app.theme.fg)),
-                    Span::styled(ghost_text, Style::default().fg(app.theme.muted_fg)),
-                    Span::styled(hint_text, Style::default().fg(app.theme.muted_fg)),
+                    Span::styled(cmd_text, app.theme.fg_style()),
+                    Span::styled(ghost_text, app.theme.muted_style()),
+                    Span::styled(hint_text, app.theme.muted_style()),
                 ],
                 total_len,
             )
@@ -49,7 +48,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             let search_text = format!("/{}", app.search_query);
             let len = search_text.len();
             (
-                vec![Span::styled(search_text, Style::default().fg(app.theme.fg))],
+                vec![Span::styled(search_text, app.theme.fg_style())],
                 len,
             )
         }
@@ -62,10 +61,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let pad_len = (area.width as usize).saturating_sub(used_width);
     let padding = " ".repeat(pad_len);
 
-    let mut line_spans = vec![Span::styled(left_str, Style::default().fg(app.theme.muted_fg))];
+    let mut line_spans = vec![Span::styled(left_str, app.theme.muted_style())];
     line_spans.extend(input_spans);
     line_spans.push(Span::raw(padding));
-    line_spans.push(Span::styled(help_hint, Style::default().fg(app.theme.muted_fg)));
+    line_spans.push(Span::styled(help_hint, app.theme.muted_style()));
 
     let paragraph = Paragraph::new(Line::from(line_spans));
     frame.render_widget(paragraph, area);

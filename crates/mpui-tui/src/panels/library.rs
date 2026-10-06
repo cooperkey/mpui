@@ -1,5 +1,4 @@
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem};
 use ratatui::Frame;
@@ -9,34 +8,28 @@ use crate::app::{App, FocusedPanel};
 /// Render the library panel — a scrollable list of tracks.
 pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
     let is_focused = app.focused_panel == FocusedPanel::Library;
-    let border_color = if is_focused {
-        app.theme.border_focused
-    } else {
-        app.theme.border
-    };
-
     let title = app.panel_title("library", "focus_library", is_focused);
 
     let block = Block::default()
         .title(title)
-        .title_style(Style::default().fg(app.theme.title))
+        .title_style(app.theme.title_style(is_focused))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color));
+        .border_style(app.theme.border_style(is_focused));
 
     let items: Vec<ListItem> = app
         .library
         .tracks()
         .map(|track| {
             let line = Line::from(vec![
-                Span::styled(track.display_artist(), Style::default().fg(app.theme.muted_fg)),
+                Span::styled(track.display_artist(), app.theme.muted_style()),
                 Span::raw(" - "),
-                Span::styled(track.display_title(), Style::default().fg(app.theme.fg)),
+                Span::styled(track.display_title(), app.theme.fg_style()),
                 Span::raw("  "),
-                Span::styled(track.display_duration(), Style::default().fg(app.theme.muted_fg)),
+                Span::styled(track.display_duration(), app.theme.muted_style()),
                 Span::raw("  "),
                 Span::styled(
                     format!("[{}]", track.path.display()),
-                    Style::default().fg(app.theme.muted_fg),
+                    app.theme.muted_style(),
                 ),
             ]);
 
@@ -46,24 +39,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
 
     app.library_state.select(Some(app.library_cursor));
 
-    let highlight_style = if is_focused {
-        if app.theme.selection_bg == ratatui::style::Color::Reset {
-            Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
-        } else {
-            Style::default()
-                .bg(app.theme.selection_bg)
-                .fg(app.theme.selection_fg)
-                .add_modifier(Modifier::BOLD)
-        }
-    } else {
-        if app.theme.selection_bg == ratatui::style::Color::Reset {
-            Style::default().add_modifier(Modifier::DIM)
-        } else {
-            Style::default()
-                .bg(app.theme.selection_bg)
-                .fg(app.theme.muted_fg)
-        }
-    };
+    let highlight_style = app.theme.selection_style(is_focused);
 
     let list = List::new(items)
         .block(block)

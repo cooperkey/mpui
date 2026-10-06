@@ -264,14 +264,14 @@ impl Default for ThemeConfig {
             bg: "default".into(),
             fg: "default".into(),
             border: "default".into(),
-            border_focused: "cyan".into(),
+            border_focused: "default".into(),
             title: "default".into(),
             selection_bg: "default".into(),
             selection_fg: "default".into(),
-            playing_fg: "cyan".into(),
+            playing_fg: "default".into(),
             progress_filled: "default".into(),
-            progress_empty: "darkgray".into(),
-            muted_fg: "darkgray".into(),
+            progress_empty: "default".into(),
+            muted_fg: "default".into(),
         }
     }
 }
