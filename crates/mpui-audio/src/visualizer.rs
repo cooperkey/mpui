@@ -51,11 +51,15 @@ impl SpectrumAnalyzer {
 
     /// Compute the magnitude spectrum from a buffer of mono f32 samples using a sliding window.
     pub fn analyze(&mut self, samples: &[f32]) {
-        for &s in samples {
-            if self.history.len() >= self.fft_size {
-                self.history.pop_front();
+        if samples.len() >= self.fft_size {
+            self.history.clear();
+            self.history.extend(&samples[samples.len() - self.fft_size..]);
+        } else {
+            let to_remove = (self.history.len() + samples.len()).saturating_sub(self.fft_size);
+            if to_remove > 0 {
+                self.history.drain(..to_remove.min(self.history.len()));
             }
-            self.history.push_back(s);
+            self.history.extend(samples);
         }
         self.samples_since_last_fft += samples.len();
 

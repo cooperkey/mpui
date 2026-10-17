@@ -30,22 +30,17 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
         let pos = app.playback.lock().position;
 
-        // Find active line index
-        let mut active_idx = 0;
-        for (i, (time, _)) in lyrics.iter().enumerate() {
-            if *time <= pos {
-                active_idx = i;
-            } else {
-                break;
-            }
-        }
+        // Find active line index via binary search
+        let active_idx = lyrics
+            .partition_point(|(time, _)| *time <= pos)
+            .saturating_sub(1);
 
         // Center active line in visible area
         let half_h = (inner.height / 2) as usize;
         let start_idx = active_idx.saturating_sub(half_h);
         let end_idx = (start_idx + inner.height as usize).min(lyrics.len());
 
-        let mut lines = Vec::new();
+        let mut lines = Vec::with_capacity(end_idx.saturating_sub(start_idx));
         for (i, (_, text)) in lyrics[start_idx..end_idx].iter().enumerate() {
             let actual_i = start_idx + i;
             let style = if actual_i == active_idx {
@@ -56,7 +51,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
                 app.theme.muted_style()
             };
 
-            lines.push(Line::from(Span::styled(text.clone(), style)));
+            lines.push(Line::from(Span::styled(text.as_str(), style)));
         }
 
         let p = Paragraph::new(lines)

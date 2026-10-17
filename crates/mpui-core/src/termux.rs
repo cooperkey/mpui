@@ -1,9 +1,14 @@
 use std::process::Command;
+use std::sync::OnceLock;
+
+static IS_TERMUX: OnceLock<bool> = OnceLock::new();
 
 /// Check if running within a Termux environment.
 pub fn is_termux() -> bool {
-    std::env::var("TERMUX_VERSION").is_ok()
-        || std::path::Path::new("/data/data/com.termux").exists()
+    *IS_TERMUX.get_or_init(|| {
+        std::env::var("TERMUX_VERSION").is_ok()
+            || std::path::Path::new("/data/data/com.termux").exists()
+    })
 }
 
 /// Acquire an Android wake lock via termux-api to enable seamless background playback.

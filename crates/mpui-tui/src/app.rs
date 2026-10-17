@@ -112,7 +112,7 @@ pub struct App {
     pub art_cache_order: std::collections::VecDeque<(mpui_core::track::TrackId, u16, u16)>,
     pub art_request_tx: Sender<ArtRequest>,
     pub art_response_rx: crossbeam_channel::Receiver<ArtResponse>,
-    pub pending_art_request: Option<(mpui_core::track::TrackId, u16, u16)>,
+    pub pending_art_request: Option<((mpui_core::track::TrackId, u16, u16), std::time::Instant)>,
 }
 
 impl App {
@@ -294,8 +294,10 @@ impl App {
     pub fn update_art_cache(&mut self) {
         while let Ok(resp) = self.art_response_rx.try_recv() {
             let key = (resp.track_id, resp.width, resp.height);
-            if self.pending_art_request == Some(key) {
-                self.pending_art_request = None;
+            if let Some((pending_key, _)) = self.pending_art_request {
+                if pending_key == key {
+                    self.pending_art_request = None;
+                }
             }
             if self.art_cache.len() >= 128 {
                 if let Some(oldest) = self.art_cache_order.pop_front() {

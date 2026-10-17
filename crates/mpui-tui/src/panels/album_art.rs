@@ -60,6 +60,22 @@ pub fn render_image_halfblock(img_bytes: &[u8], width: u16, height: u16) -> Vec<
     lines
 }
 
+use ratatui::buffer::Buffer;
+use ratatui::widgets::Widget;
+
+pub struct ArtLinesWidget<'a>(pub &'a [Line<'static>]);
+
+impl<'a> Widget for ArtLinesWidget<'a> {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        for (y, line) in self.0.iter().enumerate() {
+            if y >= area.height as usize {
+                break;
+            }
+            buf.set_line(area.left(), area.top() + y as u16, line, area.width);
+        }
+    }
+}
+
 pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
     app.update_art_cache();
 
@@ -82,24 +98,26 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
         let key = (track.id, area.width, area.height);
         let cached_exact = app.art_cache.get(&key).cloned();
         match cached_exact {
-            Some(Some(lines)) => {
-                let widget = Paragraph::new((*lines).clone())
-                    .block(block)
-                    .alignment(Alignment::Center);
-                frame.render_widget(widget, area);
+            Some(Some(ref lines)) => {
+                frame.render_widget(block, area);
+                frame.render_widget(ArtLinesWidget(lines.as_slice()), inner);
             }
             Some(None) => {
                 render_placeholder(frame, area, block, inner.height, "no art", app.theme.muted_style());
             }
             None => {
-                if app.pending_art_request != Some(key) {
+                let should_request = match app.pending_art_request {
+                    Some((pending_key, sent_at)) => pending_key != key || sent_at.elapsed() > std::time::Duration::from_millis(1500),
+                    None => true,
+                };
+                if should_request {
                     let _ = app.art_request_tx.send(crate::app::ArtRequest {
                         track_id: track.id,
                         path: track.path.clone(),
                         width: area.width,
                         height: area.height,
                     });
-                    app.pending_art_request = Some(key);
+                    app.pending_art_request = Some((key, std::time::Instant::now()));
                 }
 
                 // Fallback to cached render of the same track at different dimensions if available
@@ -111,11 +129,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App) {
                     }
                 });
 
-                if let Some(lines) = fallback {
-                    let widget = Paragraph::new((*lines).clone())
-                        .block(block)
-                        .alignment(Alignment::Center);
-                    frame.render_widget(widget, area);
+                if let Some(ref lines) = fallback {
+                    frame.render_widget(block, area);
+                    frame.render_widget(ArtLinesWidget(lines.as_slice()), inner);
                 } else {
                     render_placeholder(frame, area, block, inner.height, "...", app.theme.muted_style());
                 }

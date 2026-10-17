@@ -98,6 +98,8 @@ impl Player {
         let mut replaygain_mode = "track".to_string();
         let mut replaygain_factor: f32 = 1.0;
         
+        let mut mono_scratch = Vec::new();
+        
         loop {
             let cmd = if decoder.is_some() && !self.state.lock().paused {
                 self.command_rx.try_recv().ok()
@@ -106,10 +108,20 @@ impl Player {
             };
 
             let mut quit = false;
-            
-            let mut handle_cmd = |cmd: PlayerCommand| {
-                match cmd {
+            let mut pending_seek: Option<Duration> = None;
+            let mut commands = Vec::new();
+
+            if let Some(c) = cmd {
+                commands.push(c);
+            }
+            while let Ok(c) = self.command_rx.try_recv() {
+                commands.push(c);
+            }
+
+            for c in commands {
+                match c {
                     PlayerCommand::Play(path) => {
+                        pending_seek = None;
                         while self.sample_rx.try_recv().is_ok() {}
                         if let Some(ref out) = audio_output {
                             out.flush();
@@ -126,8 +138,12 @@ impl Player {
                             state.paused = false;
                             state.position = Duration::ZERO;
 
-                            // Ensure audio output stream exists
-                            if audio_output.is_none() {
+                            // Ensure audio output stream exists and is healthy
+                            let need_new_out = match &audio_output {
+                                Some(out) => !out.is_healthy() || out.last_callback_elapsed() > Duration::from_millis(800),
+                                None => true,
+                            };
+                            if need_new_out {
                                 if let Ok(new_output) = crate::output::AudioOutput::new(None, None, self.sample_rx.clone()) {
                                     active_out_rate = new_output.sample_rate;
                                     active_out_channels = new_output.channels as usize;
@@ -158,11 +174,23 @@ impl Player {
                     }
                     PlayerCommand::Resume => {
                         self.state.lock().paused = false;
-                        if let Some(ref out) = audio_output {
+                        let need_new_out = match &audio_output {
+                            Some(out) => !out.is_healthy() || out.last_callback_elapsed() > Duration::from_millis(800),
+                            None => true,
+                        };
+                        if need_new_out {
+                            while self.sample_rx.try_recv().is_ok() {}
+                            if let Ok(new_output) = crate::output::AudioOutput::new(None, None, self.sample_rx.clone()) {
+                                active_out_rate = new_output.sample_rate;
+                                active_out_channels = new_output.channels as usize;
+                                audio_output = Some(new_output);
+                            }
+                        } else if let Some(ref out) = audio_output {
                             let _ = out.resume();
                         }
                     }
                     PlayerCommand::Stop => {
+                        pending_seek = None;
                         decoder = None;
                         let mut state = self.state.lock();
                         state.playing = false;
@@ -176,17 +204,7 @@ impl Player {
                         }
                     }
                     PlayerCommand::Seek(duration) => {
-                        while self.sample_rx.try_recv().is_ok() {}
-                        if let Some(ref out) = audio_output {
-                            out.flush();
-                        }
-                        resampler.reset();
-                        if let Some(ref mut dec) = decoder {
-                            if dec.seek(duration).is_ok() {
-                                current_samples_decoded = (duration.as_secs_f64() * dec.sample_rate as f64) as u64;
-                                self.state.lock().position = duration;
-                            }
-                        }
+                        pending_seek = Some(duration);
                     }
                     PlayerCommand::SetVolume(v) => {
                         self.state.lock().volume = v;
@@ -207,14 +225,20 @@ impl Player {
                         quit = true;
                     }
                 }
-            };
-
-            if let Some(c) = cmd {
-                handle_cmd(c);
             }
-            
-            while let Ok(c) = self.command_rx.try_recv() {
-                handle_cmd(c);
+
+            if let Some(duration) = pending_seek {
+                while self.sample_rx.try_recv().is_ok() {}
+                if let Some(ref out) = audio_output {
+                    out.flush();
+                }
+                resampler.reset();
+                if let Some(ref mut dec) = decoder {
+                    if let Ok(actual_ts) = dec.seek(duration) {
+                        current_samples_decoded = actual_ts;
+                        self.state.lock().position = Duration::from_secs_f64(actual_ts as f64 / dec.sample_rate as f64);
+                    }
+                }
             }
 
             if quit {
@@ -251,12 +275,13 @@ impl Player {
                         equalizer.process(&mut frame);
 
                         // Tap post-EQ mono signal for visualizer (pre-volume for consistent dynamics)
-                        let mut mono = Vec::with_capacity(frame.len() / channels);
+                        mono_scratch.clear();
+                        mono_scratch.reserve(frame.len() / channels);
                         for chunk in frame.chunks(channels) {
                             let sum: f32 = chunk.iter().sum();
-                            mono.push(sum / channels as f32);
+                            mono_scratch.push(sum / channels as f32);
                         }
-                        analyzer.analyze(&mono);
+                        analyzer.analyze(&mono_scratch);
 
                         // Apply master volume attenuation for output
                         let volume = self.state.lock().volume;
@@ -277,14 +302,36 @@ impl Player {
                             resampler.process(&ch_adapted, sample_rate, active_out_rate, active_out_channels)
                         };
 
-                        if self.sample_tx.send(to_send).is_err() {
-                            break;
+                        let send_res = self.sample_tx.send_timeout(to_send, Duration::from_millis(50));
+                        match send_res {
+                            Ok(()) => {}
+                            Err(crossbeam_channel::SendTimeoutError::Disconnected(_)) => {
+                                break;
+                            }
+                            Err(crossbeam_channel::SendTimeoutError::Timeout(_)) => {
+                                // Check if audio stream stalled/died (e.g. system sleep/wake)
+                                let is_stalled = audio_output.as_ref().map_or(true, |out| {
+                                    !out.is_healthy() || out.last_callback_elapsed() > Duration::from_millis(800)
+                                });
+
+                                if is_stalled {
+                                    while self.sample_rx.try_recv().is_ok() {}
+                                    if let Ok(new_output) = crate::output::AudioOutput::new(None, None, self.sample_rx.clone()) {
+                                        active_out_rate = new_output.sample_rate;
+                                        active_out_channels = new_output.channels as usize;
+                                        audio_output = Some(new_output);
+                                    } else {
+                                        std::thread::sleep(Duration::from_millis(50));
+                                    }
+                                }
+                            }
                         }
                     } else {
                         // Allow remaining buffered samples to output so track ends naturally
                         let mut interrupted = false;
+                        let drain_start = std::time::Instant::now();
                         while !self.sample_tx.is_empty() {
-                            if !self.command_rx.is_empty() {
+                            if !self.command_rx.is_empty() || drain_start.elapsed() > Duration::from_millis(400) {
                                 interrupted = true;
                                 break;
                             }
@@ -292,8 +339,8 @@ impl Player {
                         }
                         if !interrupted {
                             if let Some(ref out) = audio_output {
-                                while !out.buffer.lock().is_empty() {
-                                    if !self.command_rx.is_empty() {
+                                while !out.is_buffer_empty() {
+                                    if !self.command_rx.is_empty() || drain_start.elapsed() > Duration::from_millis(800) {
                                         interrupted = true;
                                         break;
                                     }
@@ -374,7 +421,8 @@ impl LinearResampler {
         }
         let in_frames = input.len() / channels;
         let step = in_rate as f64 / out_rate as f64;
-        let mut out = Vec::new();
+        let est_out_frames = ((in_frames as f64 - self.phase) / step).ceil().max(0.0) as usize + 2;
+        let mut out = Vec::with_capacity(est_out_frames * channels);
 
         while self.phase < in_frames as f64 {
             let idx0 = self.phase.floor() as usize;

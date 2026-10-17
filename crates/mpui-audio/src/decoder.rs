@@ -141,14 +141,32 @@ impl StreamingDecoder {
         }
     }
 
-    pub fn seek(&mut self, time: std::time::Duration) -> Result<()> {
-        let ts = (time.as_secs_f64() * self.sample_rate as f64) as u64;
-        self.format.seek(
+    pub fn seek(&mut self, time: std::time::Duration) -> Result<u64> {
+        let requested_ts = (time.as_secs_f64() * self.sample_rate as f64) as u64;
+        let ts = if let Some(total) = self.total_duration {
+            requested_ts.min(total.saturating_sub(self.sample_rate as u64 / 10))
+        } else {
+            requested_ts
+        };
+
+        let seek_res = self.format.seek(
             symphonia::core::formats::SeekMode::Accurate,
             symphonia::core::formats::SeekTo::TimeStamp { ts, track_id: self.track_id },
-        )?;
+        );
+
+        let actual_ts = match seek_res {
+            Ok(seeked_to) => seeked_to.actual_ts,
+            Err(_) => {
+                let coarse_res = self.format.seek(
+                    symphonia::core::formats::SeekMode::Coarse,
+                    symphonia::core::formats::SeekTo::TimeStamp { ts, track_id: self.track_id },
+                )?;
+                coarse_res.actual_ts
+            }
+        };
+
         self.decoder.reset();
-        Ok(())
+        Ok(actual_ts)
     }
 }
 
