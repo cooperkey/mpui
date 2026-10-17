@@ -341,9 +341,11 @@ fn execute_action(app: &mut App, action: KeyAction) {
         KeyAction::TogglePause => app.toggle_pause(),
         KeyAction::Search => {
             app.input_mode = InputMode::Search;
+            app.search_vim_mode = crate::app::SearchVimMode::Normal;
             app.search_query.clear();
             app.search_results.clear();
             app.search_cursor = 0;
+            app.pending_key = None;
         }
         KeyAction::CommandMode => {
             app.input_mode = InputMode::Command;
@@ -505,28 +507,27 @@ fn handle_command_mode(app: &mut App, key: KeyEvent) {
 }
 
 fn handle_search_mode(app: &mut App, key: KeyEvent) {
+    match app.search_vim_mode {
+        crate::app::SearchVimMode::Normal => handle_search_normal_mode(app, key),
+        crate::app::SearchVimMode::Insert => handle_search_insert_mode(app, key),
+    }
+}
+
+fn handle_search_insert_mode(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc => {
-            app.input_mode = InputMode::Normal;
-            app.search_query.clear();
-            app.search_results.clear();
+            // Esc exits insert mode and switches to normal mode (does NOT exit search window)
+            app.search_vim_mode = crate::app::SearchVimMode::Normal;
+            app.pending_key = None;
         }
         KeyCode::Enter => {
-            if !app.search_results.is_empty() && app.search_cursor < app.search_results.len() {
-                let target_index = app.search_results[app.search_cursor].0;
-                app.library_cursor = target_index;
-                app.focused_panel = FocusedPanel::Library;
-            }
-            app.input_mode = InputMode::Normal;
+            // Enter commits text input and switches to normal mode
+            app.search_vim_mode = crate::app::SearchVimMode::Normal;
+            app.pending_key = None;
         }
         KeyCode::Backspace => {
             app.search_query.pop();
-            if app.search_query.is_empty() {
-                app.input_mode = InputMode::Normal;
-                app.search_results.clear();
-            } else {
-                update_search(app);
-            }
+            update_search(app);
         }
         KeyCode::Char(c) => {
             app.search_query.push(c);
@@ -540,6 +541,142 @@ fn handle_search_mode(app: &mut App, key: KeyEvent) {
             app.search_cursor = app.search_cursor.saturating_sub(1);
         }
         _ => {}
+    }
+}
+
+fn handle_search_normal_mode(app: &mut App, key: KeyEvent) {
+    if let Some((ref pending_str, time)) = app.pending_key.clone() {
+        if time.elapsed() < std::time::Duration::from_millis(500) {
+            if pending_str == "g" && key.code == KeyCode::Char('g') {
+                app.search_cursor = 0;
+                app.pending_key = None;
+                return;
+            }
+        }
+        app.pending_key = None;
+    }
+
+    match key.code {
+        KeyCode::Esc => {
+            // Only exits search window when escape is pressed on normal mode
+            app.input_mode = InputMode::Normal;
+            app.search_vim_mode = crate::app::SearchVimMode::Normal;
+            app.search_query.clear();
+            app.search_results.clear();
+            app.search_cursor = 0;
+            app.pending_key = None;
+        }
+        KeyCode::Char('i') | KeyCode::Char('/') => {
+            app.search_vim_mode = crate::app::SearchVimMode::Insert;
+            app.pending_key = None;
+        }
+        KeyCode::Char('A') => {
+            // Add all tracks matching the searched query to queue/playlist without exiting
+            let ids = app.library.track_ids();
+            for &(orig_index, _) in &app.search_results {
+                if let Some(&id) = ids.get(orig_index) {
+                    app.queue.push(id);
+                }
+            }
+        }
+        KeyCode::Char('a') => {
+            if key.modifiers.contains(KeyModifiers::SHIFT) {
+                let ids = app.library.track_ids();
+                for &(orig_index, _) in &app.search_results {
+                    if let Some(&id) = ids.get(orig_index) {
+                        app.queue.push(id);
+                    }
+                }
+            } else if !app.search_results.is_empty() && app.search_cursor < app.search_results.len() {
+                // Add the selected track to queue/playlist without exiting
+                let orig_index = app.search_results[app.search_cursor].0;
+                if let Some(&id) = app.library.track_ids().get(orig_index) {
+                    app.queue.push(id);
+                }
+            }
+        }
+        KeyCode::Char('j') | KeyCode::Down | KeyCode::Char('n') => {
+            let max = app.search_results.len().saturating_sub(1);
+            app.search_cursor = (app.search_cursor + 1).min(max);
+        }
+        KeyCode::Char('k') | KeyCode::Up | KeyCode::Char('N') => {
+            app.search_cursor = app.search_cursor.saturating_sub(1);
+        }
+        KeyCode::Char('g') => {
+            app.pending_key = Some(("g".to_string(), std::time::Instant::now()));
+        }
+        KeyCode::Char('G') | KeyCode::End => {
+            let max = app.search_results.len().saturating_sub(1);
+            app.search_cursor = max;
+        }
+        KeyCode::Home => {
+            app.search_cursor = 0;
+        }
+        KeyCode::PageDown => {
+            let max = app.search_results.len().saturating_sub(1);
+            app.search_cursor = (app.search_cursor + 10).min(max);
+        }
+        KeyCode::PageUp => {
+            app.search_cursor = app.search_cursor.saturating_sub(10);
+        }
+        KeyCode::Enter => {
+            if !app.search_results.is_empty() && app.search_cursor < app.search_results.len() {
+                let orig_index = app.search_results[app.search_cursor].0;
+                if let Some(&id) = app.library.track_ids().get(orig_index) {
+                    app.play_track_at_index(id);
+                }
+            }
+        }
+        KeyCode::Char(' ') => {
+            app.toggle_pause();
+        }
+        KeyCode::Char('+') | KeyCode::Char('=') => {
+            app.volume_up();
+        }
+        KeyCode::Char('-') => {
+            app.volume_down();
+        }
+        KeyCode::Char('m') => {
+            app.toggle_mute();
+        }
+        KeyCode::Char('s') => {
+            app.toggle_shuffle();
+        }
+        KeyCode::Char('r') => {
+            app.cycle_repeat();
+        }
+        KeyCode::Char('>') => {
+            if !app.queue.is_empty() {
+                if let Some(id) = app.queue.next() {
+                    app.play_track_at_index(id);
+                }
+            } else {
+                app.advance_library(true);
+            }
+        }
+        KeyCode::Char('<') => {
+            if !app.queue.is_empty() {
+                if let Some(id) = app.queue.prev() {
+                    app.play_track_at_index(id);
+                }
+            } else {
+                app.advance_library(false);
+            }
+        }
+        _ => {
+            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                match key.code {
+                    KeyCode::Char('d') => {
+                        let max = app.search_results.len().saturating_sub(1);
+                        app.search_cursor = (app.search_cursor + 10).min(max);
+                    }
+                    KeyCode::Char('u') => {
+                        app.search_cursor = app.search_cursor.saturating_sub(10);
+                    }
+                    _ => {}
+                }
+            }
+        }
     }
 }
 
@@ -1057,6 +1194,165 @@ mod tests {
 
         handle_key(&mut app, key_press(KeyCode::Esc));
         assert!(!app.show_help);
+    }
+
+    #[test]
+    fn test_search_mode_vim_layer_modal_transitions() {
+        use crate::app::SearchVimMode;
+
+        let mut app = create_test_app();
+        assert_eq!(app.input_mode, InputMode::Normal);
+
+        // Pressing '/' opens search in Normal mode
+        handle_key(&mut app, key_press(KeyCode::Char('/')));
+        assert_eq!(app.input_mode, InputMode::Search);
+        assert_eq!(app.search_vim_mode, SearchVimMode::Normal);
+
+        // Pressing 'i' enters insert mode
+        handle_key(&mut app, key_press(KeyCode::Char('i')));
+        assert_eq!(app.input_mode, InputMode::Search);
+        assert_eq!(app.search_vim_mode, SearchVimMode::Insert);
+
+        // Pressing Esc in insert mode returns to normal mode without exiting search
+        handle_key(&mut app, key_press(KeyCode::Esc));
+        assert_eq!(app.input_mode, InputMode::Search);
+        assert_eq!(app.search_vim_mode, SearchVimMode::Normal);
+
+        // Pressing '/' in normal mode enters insert mode
+        handle_key(&mut app, key_press(KeyCode::Char('/')));
+        assert_eq!(app.input_mode, InputMode::Search);
+        assert_eq!(app.search_vim_mode, SearchVimMode::Insert);
+
+        // Pressing Enter in insert mode returns to normal mode without exiting search
+        handle_key(&mut app, key_press(KeyCode::Enter));
+        assert_eq!(app.input_mode, InputMode::Search);
+        assert_eq!(app.search_vim_mode, SearchVimMode::Normal);
+
+        // Pressing other keys like 'q' does NOT exit search
+        handle_key(&mut app, key_press(KeyCode::Char('q')));
+        assert_eq!(app.input_mode, InputMode::Search);
+
+        // ONLY pressing Esc in normal mode exits search
+        handle_key(&mut app, key_press(KeyCode::Esc));
+        assert_eq!(app.input_mode, InputMode::Normal);
+    }
+
+    #[test]
+    fn test_search_insert_mode_typing_and_backspace() {
+        use crate::app::SearchVimMode;
+
+        let mut app = create_test_app();
+        handle_key(&mut app, key_press(KeyCode::Char('/')));
+        handle_key(&mut app, key_press(KeyCode::Char('i')));
+        assert_eq!(app.search_vim_mode, SearchVimMode::Insert);
+
+        // Type characters
+        handle_key(&mut app, key_press(KeyCode::Char('a')));
+        handle_key(&mut app, key_press(KeyCode::Char('b')));
+        handle_key(&mut app, key_press(KeyCode::Char('c')));
+        assert_eq!(app.search_query, "abc");
+
+        // Backspace characters
+        handle_key(&mut app, key_press(KeyCode::Backspace));
+        assert_eq!(app.search_query, "ab");
+
+        handle_key(&mut app, key_press(KeyCode::Backspace));
+        handle_key(&mut app, key_press(KeyCode::Backspace));
+        assert_eq!(app.search_query, "");
+
+        // Backspace on empty query must NOT exit search
+        handle_key(&mut app, key_press(KeyCode::Backspace));
+        assert_eq!(app.input_mode, InputMode::Search);
+        assert_eq!(app.search_vim_mode, SearchVimMode::Insert);
+    }
+
+    #[test]
+    fn test_search_normal_mode_add_to_playlist_without_exiting() {
+        use crate::app::SearchVimMode;
+
+        let mut app = create_test_app();
+        let track1 = create_dummy_track(101, "/music/song1.mp3", "Alpha Song");
+        let track2 = create_dummy_track(102, "/music/song2.mp3", "Beta Song");
+        let track3 = create_dummy_track(103, "/music/song3.mp3", "Gamma Song");
+
+        app.library.insert(track1);
+        app.library.insert(track2);
+        app.library.insert(track3);
+
+        // Open search (starts in Normal mode)
+        handle_key(&mut app, key_press(KeyCode::Char('/')));
+        assert_eq!(app.input_mode, InputMode::Search);
+        assert_eq!(app.search_vim_mode, SearchVimMode::Normal);
+
+        // Enter insert mode and type query
+        handle_key(&mut app, key_press(KeyCode::Char('i')));
+        for c in "Song".chars() {
+            handle_key(&mut app, key_press(KeyCode::Char(c)));
+        }
+        assert_eq!(app.search_results.len(), 3);
+
+        // Press Esc to enter normal mode
+        handle_key(&mut app, key_press(KeyCode::Esc));
+        assert_eq!(app.search_vim_mode, SearchVimMode::Normal);
+        assert_eq!(app.search_cursor, 0);
+
+        // Press 'a' in normal mode: adds currently selected track (track 1) to queue
+        assert_eq!(app.queue.len(), 0);
+        handle_key(&mut app, key_press(KeyCode::Char('a')));
+        assert_eq!(app.queue.len(), 1);
+        assert_eq!(app.input_mode, InputMode::Search); // STILL in search!
+
+        // Navigate down with 'j' and add track 2 with 'a'
+        handle_key(&mut app, key_press(KeyCode::Char('j')));
+        assert_eq!(app.search_cursor, 1);
+        handle_key(&mut app, key_press(KeyCode::Char('a')));
+        assert_eq!(app.queue.len(), 2);
+        assert_eq!(app.input_mode, InputMode::Search); // STILL in search!
+
+        // Shift+A adds all results of search query to queue
+        handle_key(&mut app, key_press(KeyCode::Char('A')));
+        assert_eq!(app.queue.len(), 5); // 2 + 3
+        assert_eq!(app.input_mode, InputMode::Search); // STILL in search!
+
+        // Esc in normal mode finally exits
+        handle_key(&mut app, key_press(KeyCode::Esc));
+        assert_eq!(app.input_mode, InputMode::Normal);
+    }
+
+    #[test]
+    fn test_search_normal_mode_navigation_and_enter_play() {
+        use crate::app::SearchVimMode;
+
+        let mut app = create_test_app();
+        let track1 = create_dummy_track(201, "/music/s1.mp3", "Rock 1");
+        let track2 = create_dummy_track(202, "/music/s2.mp3", "Rock 2");
+        let track3 = create_dummy_track(203, "/music/s3.mp3", "Rock 3");
+
+        app.library.insert(track1);
+        app.library.insert(track2);
+        app.library.insert(track3);
+
+        handle_key(&mut app, key_press(KeyCode::Char('/')));
+        handle_key(&mut app, key_press(KeyCode::Char('i')));
+        for c in "Rock".chars() {
+            handle_key(&mut app, key_press(KeyCode::Char(c)));
+        }
+        handle_key(&mut app, key_press(KeyCode::Esc));
+        assert_eq!(app.search_vim_mode, SearchVimMode::Normal);
+
+        // Navigation
+        handle_key(&mut app, key_press(KeyCode::Char('G')));
+        assert_eq!(app.search_cursor, 2);
+
+        // 'g g' jump to top
+        handle_key(&mut app, key_press(KeyCode::Char('g')));
+        handle_key(&mut app, key_press(KeyCode::Char('g')));
+        assert_eq!(app.search_cursor, 0);
+
+        // Press Enter plays selected track without exiting search
+        handle_key(&mut app, key_press(KeyCode::Enter));
+        assert_eq!(app.input_mode, InputMode::Search);
+        assert_eq!(app.current_playing_track, Some(mpui_core::track::TrackId(201)));
     }
 }
 

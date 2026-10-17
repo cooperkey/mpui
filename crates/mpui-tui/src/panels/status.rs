@@ -45,7 +45,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             )
         }
         crate::app::InputMode::Search => {
-            let search_text = format!("/{}", app.search_query);
+            let mode_tag = match app.search_vim_mode {
+                crate::app::SearchVimMode::Normal => "[NORMAL] ",
+                crate::app::SearchVimMode::Insert => "[INSERT] ",
+            };
+            let search_text = format!("{mode_tag}/{}", app.search_query);
             let len = search_text.len();
             (
                 vec![Span::styled(search_text, app.theme.fg_style())],

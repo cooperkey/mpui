@@ -19,6 +19,14 @@ pub enum InputMode {
     Search,
 }
 
+/// Vim modal state inside search mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SearchVimMode {
+    #[default]
+    Normal,
+    Insert,
+}
+
 /// Which panel currently has focus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FocusedPanel {
@@ -60,6 +68,7 @@ pub struct App {
     pub event_rx: Receiver<PlayerEvent>,
 
     pub input_mode: InputMode,
+    pub search_vim_mode: SearchVimMode,
     pub focused_panel: FocusedPanel,
     pub command_buffer: String,
     pub search_query: String,
@@ -163,6 +172,7 @@ impl App {
             spectrum,
             event_rx,
             input_mode: InputMode::Normal,
+            search_vim_mode: SearchVimMode::Normal,
             focused_panel: FocusedPanel::Library,
             command_buffer: String::new(),
             search_query: String::new(),

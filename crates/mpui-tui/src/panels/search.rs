@@ -2,7 +2,7 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph};
 use ratatui::Frame;
 
-use crate::app::{App, InputMode};
+use crate::app::{App, InputMode, SearchVimMode};
 
 pub fn render(frame: &mut Frame, _area: Rect, app: &App) {
     if app.input_mode != InputMode::Search {
@@ -22,11 +22,21 @@ pub fn render(frame: &mut Frame, _area: Rect, app: &App) {
         .constraints([Constraint::Length(3), Constraint::Min(1)])
         .split(area);
 
-    let search_input = Paragraph::new(format!("/{}", app.search_query))
+    let mode_str = match app.search_vim_mode {
+        SearchVimMode::Normal => "NORMAL",
+        SearchVimMode::Insert => "INSERT",
+    };
+
+    let input_display = match app.search_vim_mode {
+        SearchVimMode::Insert => format!("/{}█", app.search_query),
+        SearchVimMode::Normal => format!("/{}", app.search_query),
+    };
+
+    let search_input = Paragraph::new(input_display)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(" [search] ")
+                .title(format!(" [search - {mode_str}] "))
                 .title_style(app.theme.title_style(true))
                 .border_style(app.theme.border_style(true)),
         );
@@ -51,10 +61,16 @@ pub fn render(frame: &mut Frame, _area: Rect, app: &App) {
         list_items.push(item);
     }
 
+    let hint = match app.search_vim_mode {
+        SearchVimMode::Normal => " [i: insert] [a: add] [A: add all] [enter: play] [esc: exit] ",
+        SearchVimMode::Insert => " [esc / enter: normal mode] ",
+    };
+
     let results_list = List::new(list_items)
         .block(
             Block::default()
                 .borders(Borders::ALL)
+                .title(hint)
                 .border_style(app.theme.border_style(false)),
         );
 

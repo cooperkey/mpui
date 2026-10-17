@@ -1,2 +1,4 @@
 /target
 nots
+.DS_Store
+crates/.DS_STORE
