@@ -28,7 +28,7 @@ cargo build --release
 ```
 
 > [!NOTE]
-> or if you installed in the path, just run mpui
+> or if you installed in the path, just run `mpui`
 
 ## configure
 
