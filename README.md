@@ -46,3 +46,9 @@ cargo build --release
 | `q`     | quit          |
 
 see `config.toml` for full keybinding reference.
+
+> [!TIP]
+> You can use the dl.sh script to download videos, in different formats, including downloading playlists in yt
+
+> [!NOTE]
+> this is vibe coded
