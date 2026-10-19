@@ -7,6 +7,14 @@ lightweight tui music player. rust. vim-native. no bloat.
 ![sample 1](./img/img1.png)
 ![sample 2](./img/img2.png)
 
+## installation
+
+```sh
+git clone https://github.com/cooperkey/mpui.git
+cd mpui
+cargo install --path .
+```
+
 ## build
 
 ```sh
@@ -19,19 +27,15 @@ cargo build --release
 ./target/release/mpui
 ```
 
+> [!NOTE]
+> or if you installed in the path, just run mpui
+
 ## configure
 
 ```sh
 mkdir -p ~/.config/mpui
 cp config/default.toml ~/.config/mpui/config.toml
 # edit to taste
-```
-
-## termux
-
-```sh
-pkg install rust
-cargo build --release
 ```
 
 ## keybindings
