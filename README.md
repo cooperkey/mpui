@@ -2,6 +2,11 @@
 
 lightweight tui music player. rust. vim-native. no bloat.
 
+## screenshots
+
+![sample 1](./img/img1.png)
+![sample 2](./img/img2.png)
+
 ## build
 
 ```sh
@@ -31,13 +36,13 @@ cargo build --release
 
 ## keybindings
 
-| key | action |
-|---|---|
-| `j`/`k` | move down/up |
+| key     | action        |
+| ------- | ------------- |
+| `j`/`k` | move down/up  |
 | `enter` | play selected |
-| `space` | toggle pause |
-| `/` | search |
-| `:` | command mode |
-| `q` | quit |
+| `space` | toggle pause  |
+| `/`     | search        |
+| `:`     | command mode  |
+| `q`     | quit          |
 
 see `config.toml` for full keybinding reference.
