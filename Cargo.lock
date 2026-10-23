@@ -1159,7 +1159,7 @@ dependencies = [
 
 [[package]]
 name = "mpui"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "crossbeam-channel",
@@ -1178,7 +1178,7 @@ dependencies = [
 
 [[package]]
 name = "mpui-audio"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "cpal",
@@ -1194,7 +1194,7 @@ dependencies = [
 
 [[package]]
 name = "mpui-config"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -1207,7 +1207,7 @@ dependencies = [
 
 [[package]]
 name = "mpui-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -1223,7 +1223,7 @@ dependencies = [
 
 [[package]]
 name = "mpui-search"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "mpui-config",
@@ -1234,7 +1234,7 @@ dependencies = [
 
 [[package]]
 name = "mpui-tui"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "crossbeam-channel",

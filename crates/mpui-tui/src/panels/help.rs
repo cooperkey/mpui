@@ -53,7 +53,7 @@ pub fn render(frame: &mut Frame, _area: Rect, app: &App) {
                 ("> / <", "Next / Previous track (or library)"),
                 ("+ / -", "Volume up / down"),
                 ("m", "Toggle audio mute"),
-                ("s", "Toggle queue shuffle"),
+                ("s", "Toggle shuffle / play random when stopped"),
                 ("r", "Cycle repeat (off -> track -> queue)"),
             ],
         ),

@@ -185,6 +185,46 @@ impl Queue {
         }
     }
 
+    /// Non-destructively shuffle entire queue without preserving any current index.
+    pub fn shuffle_all(&mut self) {
+        use std::collections::hash_map::RandomState;
+        use std::hash::{BuildHasher, Hasher};
+
+        if self.items.len() <= 1 {
+            return;
+        }
+
+        if self.original_items.is_none() {
+            self.original_items = Some(self.items.clone());
+        }
+
+        let mut seed = {
+            let mut h = RandomState::new().build_hasher();
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            h.write_u128(nanos);
+            h.finish()
+        };
+        if seed == 0 {
+            seed = 0x853c49e6748fea9b;
+        }
+
+        let mut next_rand = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+
+        for i in (1..self.items.len()).rev() {
+            let rand_val = (next_rand() as usize) % (i + 1);
+            self.items.swap(i, rand_val);
+        }
+        self.current = Some(0);
+    }
+
     /// Restore queue to pre-shuffled canonical order.
     pub fn unshuffle(&mut self) {
         if let Some(orig) = self.original_items.take() {
@@ -308,5 +348,31 @@ mod tests {
         for (idx, &item) in q.items().iter().enumerate() {
             assert_eq!(item, TrackId((idx + 1) as u64));
         }
+    }
+
+    #[test]
+    fn test_queue_shuffle_all_randomizes_all_indices() {
+        let mut q = Queue::new();
+        for i in 1..=20 {
+            q.push(TrackId(i));
+        }
+        assert!(!q.is_shuffled());
+        q.shuffle_all();
+        assert!(q.is_shuffled());
+        assert_eq!(q.len(), 20);
+        assert_eq!(q.current_index(), Some(0));
+
+        let current_track = q.current_track().unwrap();
+
+        q.unshuffle();
+        assert!(!q.is_shuffled());
+        assert_eq!(q.len(), 20);
+        // Original order restored
+        for (idx, &item) in q.items().iter().enumerate() {
+            assert_eq!(item, TrackId((idx + 1) as u64));
+        }
+        // Cursor points to current_track's original index
+        assert_eq!(q.current_track(), Some(current_track));
+        assert_eq!(q.current_index(), Some((current_track.0 - 1) as usize));
     }
 }

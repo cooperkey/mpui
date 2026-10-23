@@ -110,41 +110,10 @@ fn main() -> Result<()> {
                         let _ = app.command_tx.send(PlayerCommand::Stop);
                     }
                     mpris::MprisAction::Next => {
-                        let next_id = match app.repeat_mode {
-                            mpui_config::types::RepeatMode::Queue => {
-                                if let Some(id) = app.queue.next() {
-                                    Some(id)
-                                } else if !app.queue.is_empty() {
-                                    app.queue.set_current(0);
-                                    app.queue.current_track()
-                                } else {
-                                    None
-                                }
-                            }
-                            _ => app.queue.next(),
-                        };
-                        if let Some(id) = next_id {
-                            app.play_track_at_index(id);
-                        }
+                        app.next_track();
                     }
                     mpris::MprisAction::Previous => {
-                        let prev_id = match app.repeat_mode {
-                            mpui_config::types::RepeatMode::Queue => {
-                                if let Some(id) = app.queue.prev() {
-                                    Some(id)
-                                } else if !app.queue.is_empty() {
-                                    let last = app.queue.len() - 1;
-                                    app.queue.set_current(last);
-                                    app.queue.current_track()
-                                } else {
-                                    None
-                                }
-                            }
-                            _ => app.queue.prev(),
-                        };
-                        if let Some(id) = prev_id {
-                            app.play_track_at_index(id);
-                        }
+                        app.previous_track();
                     }
                     mpris::MprisAction::SeekRelative(offset) => {
                         let mut state = app.playback.lock();

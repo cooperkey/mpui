@@ -379,51 +379,8 @@ fn execute_action(app: &mut App, action: KeyAction) {
                 }
             }
         }
-        KeyAction::NextTrack => {
-            if !app.queue.is_empty() {
-                let next_id = match app.repeat_mode {
-                    mpui_config::types::RepeatMode::Queue => {
-                        if let Some(id) = app.queue.next() {
-                            Some(id)
-                        } else if !app.queue.is_empty() {
-                            app.queue.set_current(0);
-                            app.queue.current_track()
-                        } else {
-                            None
-                        }
-                    }
-                    _ => app.queue.next(),
-                };
-                if let Some(id) = next_id {
-                    app.play_track_at_index(id);
-                }
-            } else {
-                app.advance_library(true);
-            }
-        }
-        KeyAction::PrevTrack => {
-            if !app.queue.is_empty() {
-                let prev_id = match app.repeat_mode {
-                    mpui_config::types::RepeatMode::Queue => {
-                        if let Some(id) = app.queue.prev() {
-                            Some(id)
-                        } else if !app.queue.is_empty() {
-                            let last = app.queue.len() - 1;
-                            app.queue.set_current(last);
-                            app.queue.current_track()
-                        } else {
-                            None
-                        }
-                    }
-                    _ => app.queue.prev(),
-                };
-                if let Some(id) = prev_id {
-                    app.play_track_at_index(id);
-                }
-            } else {
-                app.advance_library(false);
-            }
-        }
+        KeyAction::NextTrack => app.next_track(),
+        KeyAction::PrevTrack => app.previous_track(),
         KeyAction::ToggleVisualizer => app.show_visualizer = !app.show_visualizer,
         KeyAction::ToggleEqualizer => app.show_equalizer = !app.show_equalizer,
         KeyAction::ToggleAlbumArt => app.show_album_art = !app.show_album_art,
@@ -432,7 +389,7 @@ fn execute_action(app: &mut App, action: KeyAction) {
         KeyAction::VolumeUp => app.volume_up(),
         KeyAction::VolumeDown => app.volume_down(),
         KeyAction::MuteToggle => app.toggle_mute(),
-        KeyAction::ShuffleToggle => app.toggle_shuffle(),
+        KeyAction::ShuffleToggle => app.handle_shuffle_key(),
         KeyAction::RepeatCycle => app.cycle_repeat(),
         KeyAction::JumpToCurrent => {
             let cur_id = app.current_playing_track.or_else(|| app.queue.current_track());
@@ -640,28 +597,16 @@ fn handle_search_normal_mode(app: &mut App, key: KeyEvent) {
             app.toggle_mute();
         }
         KeyCode::Char('s') => {
-            app.toggle_shuffle();
+            app.handle_shuffle_key();
         }
         KeyCode::Char('r') => {
             app.cycle_repeat();
         }
         KeyCode::Char('>') => {
-            if !app.queue.is_empty() {
-                if let Some(id) = app.queue.next() {
-                    app.play_track_at_index(id);
-                }
-            } else {
-                app.advance_library(true);
-            }
+            app.next_track();
         }
         KeyCode::Char('<') => {
-            if !app.queue.is_empty() {
-                if let Some(id) = app.queue.prev() {
-                    app.play_track_at_index(id);
-                }
-            } else {
-                app.advance_library(false);
-            }
+            app.previous_track();
         }
         _ => {
             if key.modifiers.contains(KeyModifiers::CONTROL) {

@@ -107,6 +107,8 @@ pub struct App {
     pub show_help: bool,
     pub help_scroll: u16,
     pub current_playing_track: Option<mpui_core::track::TrackId>,
+    pub library_shuffle_order: Vec<mpui_core::track::TrackId>,
+    pub library_shuffle_index: Option<usize>,
 
     pub art_cache: ArtCache,
     pub art_cache_order: std::collections::VecDeque<(mpui_core::track::TrackId, u16, u16)>,
@@ -205,6 +207,8 @@ impl App {
             show_help: false,
             help_scroll: 0,
             current_playing_track: None,
+            library_shuffle_order: Vec::new(),
+            library_shuffle_index: None,
             art_cache: std::collections::HashMap::with_capacity(128),
             art_cache_order: std::collections::VecDeque::with_capacity(128),
             art_request_tx: art_tx,
@@ -263,9 +267,144 @@ impl App {
     pub fn toggle_shuffle(&mut self) {
         self.shuffle = !self.shuffle;
         if self.shuffle {
-            self.queue.shuffle();
+            if !self.queue.is_empty() {
+                self.queue.shuffle();
+            } else {
+                self.reshuffle_library(self.current_playing_track);
+            }
         } else {
-            self.queue.unshuffle();
+            if !self.queue.is_empty() {
+                self.queue.unshuffle();
+            } else {
+                self.library_shuffle_order.clear();
+                self.library_shuffle_index = None;
+            }
+        }
+    }
+
+    pub fn handle_shuffle_key(&mut self) {
+        let is_active = {
+            let state = self.playback.lock();
+            state.playing || state.paused
+        };
+
+        if !is_active {
+            self.shuffle = true;
+            self.play_random();
+        } else {
+            self.toggle_shuffle();
+        }
+    }
+
+    pub fn play_random(&mut self) -> bool {
+        if !self.queue.is_empty() {
+            self.queue.shuffle_all();
+            if let Some(&first_id) = self.queue.items().first() {
+                self.queue.set_current(0);
+                self.play_track_at_index(first_id);
+                return true;
+            }
+        } else if !self.library.is_empty() {
+            self.reshuffle_library(None);
+            if let Some(&first_id) = self.library_shuffle_order.first() {
+                self.library_shuffle_index = Some(0);
+                self.play_track_at_index(first_id);
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn reshuffle_library(&mut self, starting_track: Option<mpui_core::track::TrackId>) {
+        use std::collections::hash_map::RandomState;
+        use std::hash::{BuildHasher, Hasher};
+
+        let mut ids = self.library.track_ids().to_vec();
+        if ids.is_empty() {
+            self.library_shuffle_order.clear();
+            self.library_shuffle_index = None;
+            return;
+        }
+
+        let mut seed = {
+            let mut h = RandomState::new().build_hasher();
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            h.write_u128(nanos);
+            h.finish()
+        };
+        if seed == 0 {
+            seed = 0x853c49e6748fea9b;
+        }
+
+        let mut next_rand = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+
+        for i in (1..ids.len()).rev() {
+            let rand_val = (next_rand() as usize) % (i + 1);
+            ids.swap(i, rand_val);
+        }
+
+        if let Some(start_id) = starting_track {
+            if let Some(pos) = ids.iter().position(|&id| id == start_id) {
+                ids.swap(0, pos);
+            }
+        }
+
+        self.library_shuffle_order = ids;
+        self.library_shuffle_index = Some(0);
+    }
+
+    pub fn next_track(&mut self) {
+        if !self.queue.is_empty() {
+            let next_id = match self.repeat_mode {
+                mpui_config::types::RepeatMode::Queue => {
+                    if let Some(id) = self.queue.next() {
+                        Some(id)
+                    } else if !self.queue.is_empty() {
+                        self.queue.set_current(0);
+                        self.queue.current_track()
+                    } else {
+                        None
+                    }
+                }
+                _ => self.queue.next(),
+            };
+            if let Some(id) = next_id {
+                self.play_track_at_index(id);
+            }
+        } else {
+            self.advance_library(true);
+        }
+    }
+
+    pub fn previous_track(&mut self) {
+        if !self.queue.is_empty() {
+            let prev_id = match self.repeat_mode {
+                mpui_config::types::RepeatMode::Queue => {
+                    if let Some(id) = self.queue.prev() {
+                        Some(id)
+                    } else if !self.queue.is_empty() {
+                        let last = self.queue.len() - 1;
+                        self.queue.set_current(last);
+                        self.queue.current_track()
+                    } else {
+                        None
+                    }
+                }
+                _ => self.queue.prev(),
+            };
+            if let Some(id) = prev_id {
+                self.play_track_at_index(id);
+            }
+        } else {
+            self.advance_library(false);
         }
     }
 
@@ -357,11 +496,19 @@ impl App {
     pub fn play_track_at_index(&mut self, id: mpui_core::track::TrackId) {
         self.current_playing_track = Some(id);
         if !self.queue.is_empty() {
-            if let Some(pos) = self.queue.items().iter().position(|&t| t == id) {
-                self.queue.set_current(pos);
-            } else {
-                self.queue.push(id);
-                self.queue.set_current(self.queue.len() - 1);
+            if self.queue.current_track() != Some(id) {
+                if let Some(pos) = self.queue.items().iter().position(|&t| t == id) {
+                    self.queue.set_current(pos);
+                } else {
+                    self.queue.push(id);
+                    self.queue.set_current(self.queue.len() - 1);
+                }
+            }
+        }
+
+        if self.shuffle {
+            if let Some(pos) = self.library_shuffle_order.iter().position(|&t| t == id) {
+                self.library_shuffle_index = Some(pos);
             }
         }
 
@@ -384,56 +531,120 @@ impl App {
             return false;
         }
 
-        let current_id = self.current_playing_track;
-        let next_id = match self.repeat_mode {
-            mpui_config::types::RepeatMode::Track => current_id.or_else(|| ids.first().copied()),
-            mpui_config::types::RepeatMode::Queue => {
-                if let Some(cur) = current_id {
-                    if let Some(idx) = ids.iter().position(|&id| id == cur) {
-                        if forward {
-                            let next_idx = (idx + 1) % ids.len();
-                            Some(ids[next_idx])
-                        } else {
-                            let prev_idx = if idx == 0 { ids.len() - 1 } else { idx - 1 };
-                            Some(ids[prev_idx])
-                        }
-                    } else {
-                        ids.first().copied()
-                    }
-                } else {
-                    ids.first().copied()
-                }
+        if self.shuffle {
+            if self.library_shuffle_order.len() != ids.len()
+                || !ids.iter().all(|id| self.library_shuffle_order.contains(id))
+            {
+                self.reshuffle_library(self.current_playing_track);
             }
-            mpui_config::types::RepeatMode::Off => {
-                if let Some(cur) = current_id {
-                    if let Some(idx) = ids.iter().position(|&id| id == cur) {
-                        if forward {
-                            if idx + 1 < ids.len() {
-                                Some(ids[idx + 1])
-                            } else {
-                                None
-                            }
-                        } else {
-                            if idx > 0 {
-                                Some(ids[idx - 1])
-                            } else {
-                                None
-                            }
-                        }
-                    } else {
-                        ids.first().copied()
-                    }
-                } else {
-                    ids.first().copied()
-                }
-            }
-        };
 
-        if let Some(id) = next_id {
-            self.play_track_at_index(id);
-            true
+            if self.library_shuffle_order.is_empty() {
+                return false;
+            }
+
+            let cur_idx = self
+                .library_shuffle_index
+                .or_else(|| {
+                    self.current_playing_track
+                        .and_then(|cur| self.library_shuffle_order.iter().position(|&id| id == cur))
+                })
+                .unwrap_or(0);
+
+            let next_idx = match self.repeat_mode {
+                mpui_config::types::RepeatMode::Track => Some(cur_idx),
+                mpui_config::types::RepeatMode::Queue => {
+                    if forward {
+                        if cur_idx + 1 < self.library_shuffle_order.len() {
+                            Some(cur_idx + 1)
+                        } else {
+                            self.reshuffle_library(None);
+                            Some(0)
+                        }
+                    } else {
+                        if cur_idx > 0 {
+                            Some(cur_idx - 1)
+                        } else {
+                            Some(self.library_shuffle_order.len().saturating_sub(1))
+                        }
+                    }
+                }
+                mpui_config::types::RepeatMode::Off => {
+                    if forward {
+                        if cur_idx + 1 < self.library_shuffle_order.len() {
+                            Some(cur_idx + 1)
+                        } else {
+                            None
+                        }
+                    } else {
+                        if cur_idx > 0 {
+                            Some(cur_idx - 1)
+                        } else {
+                            None
+                        }
+                    }
+                }
+            };
+
+            if let Some(idx) = next_idx {
+                self.library_shuffle_index = Some(idx);
+                let next_id = self.library_shuffle_order[idx];
+                self.play_track_at_index(next_id);
+                true
+            } else {
+                false
+            }
         } else {
-            false
+            let current_id = self.current_playing_track;
+            let next_id = match self.repeat_mode {
+                mpui_config::types::RepeatMode::Track => current_id.or_else(|| ids.first().copied()),
+                mpui_config::types::RepeatMode::Queue => {
+                    if let Some(cur) = current_id {
+                        if let Some(idx) = ids.iter().position(|&id| id == cur) {
+                            if forward {
+                                let next_idx = (idx + 1) % ids.len();
+                                Some(ids[next_idx])
+                            } else {
+                                let prev_idx = if idx == 0 { ids.len() - 1 } else { idx - 1 };
+                                Some(ids[prev_idx])
+                            }
+                        } else {
+                            ids.first().copied()
+                        }
+                    } else {
+                        ids.first().copied()
+                    }
+                }
+                mpui_config::types::RepeatMode::Off => {
+                    if let Some(cur) = current_id {
+                        if let Some(idx) = ids.iter().position(|&id| id == cur) {
+                            if forward {
+                                if idx + 1 < ids.len() {
+                                    Some(ids[idx + 1])
+                                } else {
+                                    None
+                                }
+                            } else {
+                                if idx > 0 {
+                                    Some(ids[idx - 1])
+                                } else {
+                                    None
+                                }
+                            }
+                        } else {
+                            ids.first().copied()
+                        }
+                    } else {
+                        ids.first().copied()
+                    }
+                }
+            };
+
+            if let Some(id) = next_id {
+                self.play_track_at_index(id);
+                true
+            } else {
+                false
+            }
         }
     }
 
@@ -679,5 +890,105 @@ mod tests {
         app.config.keybindings.insert("e".to_string(), "focus_equalizer".to_string());
         app.config.keybindings.remove("4");
         assert_eq!(app.panel_title("equalizer", "focus_equalizer", true), " [equalizer][e] ");
+    }
+
+    #[test]
+    fn test_empty_queue_library_shuffle_playback() {
+        let (mut app, _event_tx, _cmd_rx) = create_test_app();
+        for i in 1..=5 {
+            app.library.insert(create_dummy_track(i, &format!("/music/song{i}.mp3"), &format!("Song {i}")));
+        }
+        assert!(app.queue.is_empty());
+
+        app.shuffle = true;
+        app.play_track_at_index(mpui_core::track::TrackId(1));
+        assert_eq!(app.current_playing_track, Some(mpui_core::track::TrackId(1)));
+
+        let mut played = vec![mpui_core::track::TrackId(1)];
+        for _ in 0..4 {
+            assert!(app.advance_library(true));
+            assert!(app.queue.is_empty());
+            let current = app.current_playing_track.unwrap();
+            played.push(current);
+        }
+
+        // All 5 distinct tracks should have been played
+        let mut sorted = played.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), 5);
+
+        // At end of shuffle cycle in RepeatMode::Off, advance_library returns false
+        app.repeat_mode = RepeatMode::Off;
+        assert!(!app.advance_library(true));
+    }
+
+    #[test]
+    fn test_handle_shuffle_key_when_stopped_starts_random_playback() {
+        let (mut app, _event_tx, cmd_rx) = create_test_app();
+        for i in 1..=5 {
+            app.library.insert(create_dummy_track(i, &format!("/music/song{i}.mp3"), &format!("Song {i}")));
+        }
+
+        assert!(!app.playback.lock().playing);
+        assert!(!app.shuffle);
+        assert_eq!(app.current_playing_track, None);
+
+        // Pressing 's' when stopped enables shuffle and starts playing a random track
+        app.handle_shuffle_key();
+
+        assert!(app.shuffle);
+        assert!(app.current_playing_track.is_some());
+        assert!(cmd_rx.try_recv().is_ok());
+
+        // Subsequent library advance continues playing randomly
+        assert!(app.advance_library(true));
+        assert!(app.current_playing_track.is_some());
+    }
+
+    #[test]
+    fn test_handle_shuffle_key_when_playing_toggles_shuffle() {
+        let (mut app, _event_tx, _cmd_rx) = create_test_app();
+        for i in 1..=3 {
+            app.library.insert(create_dummy_track(i, &format!("/music/song{i}.mp3"), &format!("Song {i}")));
+        }
+
+        app.play_track_at_index(mpui_core::track::TrackId(1));
+        app.playback.lock().playing = true;
+        assert!(!app.shuffle);
+
+        // Pressing 's' while playing toggles shuffle on
+        app.handle_shuffle_key();
+        assert!(app.shuffle);
+        assert_eq!(app.current_playing_track, Some(mpui_core::track::TrackId(1)));
+
+        // Pressing 's' again while playing toggles shuffle off
+        app.handle_shuffle_key();
+        assert!(!app.shuffle);
+        assert_eq!(app.current_playing_track, Some(mpui_core::track::TrackId(1)));
+    }
+
+    #[test]
+    fn test_library_shuffle_backward_advance() {
+        let (mut app, _event_tx, _cmd_rx) = create_test_app();
+        for i in 1..=5 {
+            app.library.insert(create_dummy_track(i, &format!("/music/song{i}.mp3"), &format!("Song {i}")));
+        }
+
+        app.shuffle = true;
+        app.play_track_at_index(mpui_core::track::TrackId(1));
+
+        // Advance forward
+        assert!(app.advance_library(true));
+        let second_track = app.current_playing_track;
+        assert_ne!(second_track, Some(mpui_core::track::TrackId(1)));
+
+        // Advance backward restores previous track
+        assert!(app.advance_library(false));
+        assert_eq!(app.current_playing_track, Some(mpui_core::track::TrackId(1)));
+
+        // Advance forward again goes to the same second track
+        assert!(app.advance_library(true));
+        assert_eq!(app.current_playing_track, second_track);
     }
 }
