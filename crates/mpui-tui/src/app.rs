@@ -10,6 +10,7 @@ use mpui_core::queue::Queue;
 use mpui_config::Config;
 use mpui_config::types::{RepeatMode, Volume};
 use mpui_search::SearchEngine;
+use crate::library_tree::LibraryTree;
 
 /// Active input mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,6 +82,7 @@ pub struct App {
     pub library_cursor: usize,
     /// Cursor position within the queue.
     pub queue_cursor: usize,
+    pub library_tree: LibraryTree,
 
     pub should_quit: bool,
 
@@ -209,6 +211,7 @@ impl App {
             current_playing_track: None,
             library_shuffle_order: Vec::new(),
             library_shuffle_index: None,
+            library_tree: LibraryTree::new(),
             art_cache: std::collections::HashMap::with_capacity(128),
             art_cache_order: std::collections::VecDeque::with_capacity(128),
             art_request_tx: art_tx,
@@ -224,6 +227,7 @@ impl App {
             self.config.library.scan_hidden,
             Some(&self.config.library.cache_path),
         );
+        self.library_tree.build(&self.library, &self.config.library.directories);
     }
 
     pub fn volume_up(&mut self) {
@@ -468,12 +472,18 @@ impl App {
         }
 
         if self.focused_panel == FocusedPanel::Library {
+            if let Some(id) = self.library_tree.get_track_id(self.library_cursor) {
+                return Some(id);
+            }
             if let Some(&id) = self.library.track_ids().get(self.library_cursor) {
                 return Some(id);
             }
         }
 
         // Fallbacks when focus is elsewhere
+        if let Some(id) = self.library_tree.get_track_id(self.library_cursor) {
+            return Some(id);
+        }
         if let Some(&id) = self.library.track_ids().get(self.library_cursor) {
             return Some(id);
         }
@@ -495,6 +505,8 @@ impl App {
 
     pub fn play_track_at_index(&mut self, id: mpui_core::track::TrackId) {
         self.current_playing_track = Some(id);
+        self.reveal_track_in_library(id);
+
         if !self.queue.is_empty() {
             if self.queue.current_track() != Some(id) {
                 if let Some(pos) = self.queue.items().iter().position(|&t| t == id) {
@@ -522,6 +534,116 @@ impl App {
             let _ = self.command_tx.send(PlayerCommand::Play(track.path.clone()));
             self.current_art = mpui_core::metadata::extract_cover_art(&track.path).map(|art| (id, art));
             self.current_lyrics = mpui_core::metadata::extract_lyrics(&track.path);
+        }
+    }
+
+    pub fn reveal_track_in_library(&mut self, id: mpui_core::track::TrackId) {
+        if self.library_tree.is_empty() && !self.library.is_empty() {
+            self.library_tree.build(&self.library, &self.config.library.directories);
+        }
+
+        if let Some(idx) = self.library_tree.reveal_track(id) {
+            self.library_cursor = idx;
+            self.library_state.select(Some(idx));
+        } else if let Some(idx) = self.library.track_ids().iter().position(|&t| t == id) {
+            self.library_cursor = idx;
+            self.library_state.select(Some(idx));
+        }
+    }
+
+    pub fn library_confirm(&mut self) {
+        if self.library_tree.is_empty() && !self.library.is_empty() {
+            self.library_tree.build(&self.library, &self.config.library.directories);
+        }
+
+        if let Some(item) = self.library_tree.visible_items.get(self.library_cursor).cloned() {
+            if item.is_dir {
+                self.library_tree.toggle_expand(self.library_cursor);
+            } else if let Some(id) = item.track_id {
+                self.play_track_at_index(id);
+            }
+        } else {
+            let ids = self.library.track_ids();
+            if let Some(&id) = ids.get(self.library_cursor) {
+                self.play_track_at_index(id);
+            }
+        }
+    }
+
+    pub fn library_expand(&mut self) {
+        if self.library_tree.is_empty() && !self.library.is_empty() {
+            self.library_tree.build(&self.library, &self.config.library.directories);
+        }
+
+        if let Some(item) = self.library_tree.visible_items.get(self.library_cursor) {
+            if item.is_dir {
+                if !item.expanded {
+                    self.library_tree.expand(self.library_cursor);
+                } else if self.library_cursor + 1 < self.library_tree.len() {
+                    self.library_cursor += 1;
+                    self.metadata_scroll = 0;
+                }
+                return;
+            }
+        }
+
+        // Seek forward fallback if not on directory
+        let mut state = self.playback.lock();
+        if state.playing {
+            let new_pos = state.position + std::time::Duration::from_secs(5);
+            state.position = new_pos;
+            let _ = self.command_tx.send(PlayerCommand::Seek(new_pos));
+        }
+    }
+
+    pub fn library_collapse(&mut self) {
+        if self.library_tree.is_empty() && !self.library.is_empty() {
+            self.library_tree.build(&self.library, &self.config.library.directories);
+        }
+
+        if let Some(item) = self.library_tree.visible_items.get(self.library_cursor) {
+            if item.is_dir && item.expanded {
+                self.library_tree.collapse(self.library_cursor);
+                return;
+            } else if let Some(parent_idx) = self.library_tree.collapse(self.library_cursor) {
+                self.library_cursor = parent_idx;
+                self.metadata_scroll = 0;
+                return;
+            }
+        }
+
+        // Seek back fallback if at root
+        let mut state = self.playback.lock();
+        if state.playing {
+            let new_pos = state.position.saturating_sub(std::time::Duration::from_secs(5));
+            state.position = new_pos;
+            let _ = self.command_tx.send(PlayerCommand::Seek(new_pos));
+        }
+    }
+
+    pub fn library_queue_add(&mut self) {
+        if self.library_tree.is_empty() && !self.library.is_empty() {
+            self.library_tree.build(&self.library, &self.config.library.directories);
+        }
+
+        if !self.library_tree.is_empty() {
+            let ids = self.library_tree.collect_track_ids(self.library_cursor);
+            for id in ids {
+                self.queue.push(id);
+            }
+        } else {
+            let ids = self.library.track_ids();
+            if let Some(&id) = ids.get(self.library_cursor) {
+                self.queue.push(id);
+            }
+        }
+    }
+
+    pub fn library_len(&self) -> usize {
+        if !self.library_tree.is_empty() {
+            self.library_tree.len()
+        } else {
+            self.library.len()
         }
     }
 
@@ -990,5 +1112,64 @@ mod tests {
         // Advance forward again goes to the same second track
         assert!(app.advance_library(true));
         assert_eq!(app.current_playing_track, second_track);
+    }
+
+    #[test]
+    fn test_playing_random_reveals_track_in_library() {
+        let (mut app, _event_tx, _cmd_rx) = create_test_app();
+        app.library.insert(create_dummy_track(1, "/music/Rock/Queen/01.mp3", "Bohemian Rhapsody"));
+        app.library.insert(create_dummy_track(2, "/music/Rock/Queen/02.mp3", "Radio Ga Ga"));
+        app.library.insert(create_dummy_track(3, "/music/Jazz/Miles/01.mp3", "So What"));
+
+        app.library_tree.build(&app.library, &[std::path::PathBuf::from("/music")]);
+
+        // Initially playback is stopped
+        assert!(!app.playback.lock().playing);
+
+        // Press 's' when stopped: starts random playback
+        app.handle_shuffle_key();
+        assert!(app.shuffle);
+        let playing_id = app.current_playing_track.expect("should play a track");
+
+        // Verify the library cursor now points to this track in the tree
+        let cursor = app.library_cursor;
+        assert!(cursor < app.library_tree.len());
+        assert_eq!(app.library_tree.visible_items[cursor].track_id, Some(playing_id));
+    }
+
+    #[test]
+    fn test_library_confirm_directory_toggles() {
+        let (mut app, _event_tx, _cmd_rx) = create_test_app();
+        app.library.insert(create_dummy_track(1, "/music/Rock/Queen/01.mp3", "Song 1"));
+        app.library_tree.build(&app.library, &[std::path::PathBuf::from("/music")]);
+
+        // Find the "Rock" directory node
+        let rock_idx = app.library_tree.visible_items.iter().position(|i| i.name == "Rock").unwrap();
+        app.library_cursor = rock_idx;
+        assert!(app.library_tree.visible_items[rock_idx].expanded);
+
+        // Enter on directory toggles collapse
+        app.library_confirm();
+        assert!(!app.library_tree.visible_items[rock_idx].expanded);
+
+        // Enter again toggles expand
+        app.library_confirm();
+        assert!(app.library_tree.visible_items[rock_idx].expanded);
+    }
+
+    #[test]
+    fn test_library_queue_add_directory() {
+        let (mut app, _event_tx, _cmd_rx) = create_test_app();
+        app.library.insert(create_dummy_track(1, "/music/Rock/Queen/01.mp3", "Song 1"));
+        app.library.insert(create_dummy_track(2, "/music/Rock/Queen/02.mp3", "Song 2"));
+        app.library_tree.build(&app.library, &[std::path::PathBuf::from("/music")]);
+
+        let rock_idx = app.library_tree.visible_items.iter().position(|i| i.name == "Rock").unwrap();
+        app.library_cursor = rock_idx;
+
+        assert_eq!(app.queue.len(), 0);
+        app.library_queue_add();
+        // Both songs in the Rock folder should be added to the queue
+        assert_eq!(app.queue.len(), 2);
     }
 }

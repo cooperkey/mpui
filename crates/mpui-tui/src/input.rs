@@ -291,7 +291,9 @@ fn execute_action(app: &mut App, action: KeyAction) {
         }
         KeyAction::JumpBottom => move_cursor_bottom(app),
         KeyAction::CollapseOrSeekBack => {
-            if app.focused_panel == FocusedPanel::Equalizer {
+            if app.focused_panel == FocusedPanel::Library {
+                app.library_collapse();
+            } else if app.focused_panel == FocusedPanel::Equalizer {
                 app.eq_cursor = app.eq_cursor.saturating_sub(1);
             } else {
                 let mut state = app.playback.lock();
@@ -303,7 +305,9 @@ fn execute_action(app: &mut App, action: KeyAction) {
             }
         }
         KeyAction::ExpandOrSeekForward => {
-            if app.focused_panel == FocusedPanel::Equalizer {
+            if app.focused_panel == FocusedPanel::Library {
+                app.library_expand();
+            } else if app.focused_panel == FocusedPanel::Equalizer {
                 app.eq_cursor = (app.eq_cursor + 1).min(9);
             } else {
                 let mut state = app.playback.lock();
@@ -362,9 +366,13 @@ fn execute_action(app: &mut App, action: KeyAction) {
         KeyAction::FocusMetadata => focus_panel(app, FocusedPanel::Metadata),
         KeyAction::FocusLyrics => focus_panel(app, FocusedPanel::Lyrics),
         KeyAction::QueueAdd => {
-            let ids = app.library.track_ids();
-            if let Some(&id) = ids.get(app.library_cursor) {
-                app.queue.push(id);
+            if app.focused_panel == FocusedPanel::Library {
+                app.library_queue_add();
+            } else {
+                let ids = app.library.track_ids();
+                if let Some(&id) = ids.get(app.library_cursor) {
+                    app.queue.push(id);
+                }
             }
         }
         KeyAction::QueueRemove => {
@@ -837,10 +845,7 @@ fn parse_duration_str(s: &str) -> Option<std::time::Duration> {
 fn handle_confirm(app: &mut App) {
     match app.focused_panel {
         FocusedPanel::Library => {
-            let ids = app.library.track_ids();
-            if let Some(&id) = ids.get(app.library_cursor) {
-                app.play_track_at_index(id);
-            }
+            app.library_confirm();
         }
         FocusedPanel::Queue => {
             let items = app.queue.items();
@@ -856,7 +861,7 @@ fn handle_confirm(app: &mut App) {
 fn move_cursor_down(app: &mut App) {
     match app.focused_panel {
         FocusedPanel::Library => {
-            let max = app.library.len().saturating_sub(1);
+            let max = app.library_len().saturating_sub(1);
             if app.library_cursor < max {
                 app.library_cursor += 1;
                 app.metadata_scroll = 0;
@@ -914,7 +919,7 @@ fn move_cursor_up(app: &mut App) {
 fn move_cursor_bottom(app: &mut App) {
     match app.focused_panel {
         FocusedPanel::Library => {
-            app.library_cursor = app.library.len().saturating_sub(1);
+            app.library_cursor = app.library_len().saturating_sub(1);
             app.metadata_scroll = 0;
         }
         FocusedPanel::Queue => {

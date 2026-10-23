@@ -23,7 +23,6 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     }
 
     // Floating overlays render atop base panels
-    panels::search::render(frame, size, app);
     panels::help::render(frame, size, app);
 }
 
